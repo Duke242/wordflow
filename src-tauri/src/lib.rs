@@ -292,9 +292,16 @@ pub fn run() {
     let app = tauri::Builder::default()
         // Launching WordFlow again brings the running app forward instead of
         // starting a second copy with its own tray icon and hotkey.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            tray::open_main_window(app, None);
-        }))
+        .plugin(
+            tauri_plugin_single_instance::Builder::new()
+                .callback(|app, _args, _cwd| {
+                    tray::open_main_window(app, None);
+                })
+                // The bundle identifier can't be the D-Bus name on Linux: "2048labs"
+                // starts with a digit, which D-Bus rejects.
+                .dbus_id("com.labs2048.speaktype")
+                .build(),
+        )
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
