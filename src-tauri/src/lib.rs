@@ -288,6 +288,20 @@ fn sync_launch_at_login(app: &AppHandle, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Maximizes the main window when its default size doesn't fit the screen, as
+/// on a 1366×768 laptop, where the onboarding footer would otherwise sit below
+/// the bottom of the screen. The window isn't placed yet, so its frame size is
+/// unknown; maximizing leaves the title bar and panels to the window manager.
+fn fit_to_screen(window: &tauri::WebviewWindow) {
+    let (Ok(Some(monitor)), Ok(size)) = (window.current_monitor(), window.inner_size()) else {
+        return;
+    };
+    let area = monitor.work_area().size;
+    if size.width > area.width || size.height > area.height {
+        let _ = window.maximize();
+    }
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         // Launching WordFlow again brings the running app forward instead of
@@ -345,6 +359,7 @@ pub fn run() {
 
             if let Some(main) = app.get_webview_window("main") {
                 platform::style_main_window(&main);
+                fit_to_screen(&main);
                 if in_background {
                     let _ = main.hide();
                 }
