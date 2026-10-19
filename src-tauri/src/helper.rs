@@ -46,6 +46,7 @@ pub fn worker_path() -> Option<PathBuf> {
 struct Reply {
     text: Option<String>,
     error: Option<String>,
+    confidence: Option<f32>,
 }
 
 /// A running helper. Dropping it stops the process.
@@ -121,6 +122,16 @@ impl Worker {
     }
 
     pub fn call(&mut self, request: &impl Serialize, timeout: Duration) -> Result<String, String> {
+        self.call_scored(request, timeout).map(|(text, _)| text)
+    }
+
+    /// Like `call`, with the reply's confidence: the average log-probability of
+    /// the tokens a speech model wrote, if it sent one.
+    pub fn call_scored(
+        &mut self,
+        request: &impl Serialize,
+        timeout: Duration,
+    ) -> Result<(String, Option<f32>), String> {
         let result = self.exchange(request, timeout);
         if let Err(Failure::Broken(_)) = result {
             self.broken = true;
@@ -130,7 +141,11 @@ impl Worker {
         })
     }
 
-    fn exchange(&mut self, request: &impl Serialize, timeout: Duration) -> Result<String, Failure> {
+    fn exchange(
+        &mut self,
+        request: &impl Serialize,
+        timeout: Duration,
+    ) -> Result<(String, Option<f32>), Failure> {
         let role = self.role;
         let broken = Failure::Broken;
         self.last_used = Instant::now();
@@ -156,7 +171,7 @@ impl Worker {
             .map_err(|e| broken(format!("Unreadable reply from the {role} helper: {e}")))?;
         match (reply.text, reply.error) {
             (_, Some(error)) => Err(Failure::Refused(error)),
-            (Some(text), None) => Ok(text),
+            (Some(text), None) => Ok((text, reply.confidence)),
             (None, None) => Err(broken(format!("Empty reply from the {role} helper"))),
         }
     }

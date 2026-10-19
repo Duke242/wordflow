@@ -1,6 +1,10 @@
 //! IBM Granite Speech, a language model that listens: run through llama.cpp by
 //! the helper program (see `helper`), in its own process like cleanup models.
-//! Dictionary words go to it as keywords, which it spells as given.
+//!
+//! It takes no keywords. Given the dictionary's words, it dropped most
+//! punctuation, wrote the words where they weren't said ("A." from "a PR"),
+//! and swapped similar ones ("Wisper" for "Whisper"). The dictionary still
+//! corrects its transcripts afterwards, as for the other models.
 
 use std::{
     path::{Path, PathBuf},
@@ -10,7 +14,7 @@ use std::{
 use base64::Engine as _;
 use serde::Serialize;
 
-use crate::{audio::WHISPER_SAMPLE_RATE, helper::Worker, models::GRANITE_FILES, text::Prompt};
+use crate::{audio::WHISPER_SAMPLE_RATE, helper::Worker, models::GRANITE_FILES};
 
 const RATE: usize = WHISPER_SAMPLE_RATE as usize;
 /// The first load on a computer also compiles the GPU's shaders, about 30
@@ -26,6 +30,11 @@ const FRAME: usize = RATE / 50;
 const MIN_SAMPLES: usize = RATE;
 
 const INSTRUCTION: &str = "transcribe the speech with proper punctuation and capitalization.";
+/// Transcripts with a lower average log-probability per token are dropped as
+/// made up. For silence, a tap of the key or room noise, Granite writes a
+/// sentence, often in another language, at -0.76 or lower; real dictations
+/// measured -0.61 or higher, most above -0.3.
+const MIN_CONFIDENCE: f32 = -0.7;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,16 +65,20 @@ impl Granite {
         })
     }
 
-    pub fn transcribe(&mut self, samples: &[f32], prompt: &Prompt) -> Result<String, String> {
-        let instruction = instruction(prompt);
+    pub fn transcribe(&mut self, samples: &[f32]) -> Result<String, String> {
         let mut texts = Vec::new();
         for part in parts(samples) {
-            // Given silence or a quiet room, Granite makes up a sentence, often in
-            // another language, where Whisper and Parakeet write nothing.
+            // Given silence, Granite makes up a sentence where Whisper and
+            // Parakeet write nothing. Quiet parts are skipped without asking it,
+            // and what it isn't sure of is dropped.
             if !crate::live::has_speech(&samples[part.clone()]) {
                 continue;
             }
-            let text = self.run(&samples[part], &instruction)?;
+            let (text, confidence) = self.run(&samples[part])?;
+            if confidence.is_some_and(|c| c < MIN_CONFIDENCE) {
+                eprintln!("[granite] dropped a transcript it wasn't sure of ({confidence:.2?})");
+                continue;
+            }
             if !text.is_empty() {
                 texts.push(text);
             }
@@ -73,7 +86,7 @@ impl Granite {
         Ok(texts.join(" "))
     }
 
-    fn run(&mut self, samples: &[f32], instruction: &str) -> Result<String, String> {
+    fn run(&mut self, samples: &[f32]) -> Result<(String, Option<f32>), String> {
         // A helper that crashed or hung last time is replaced.
         if self.worker.broken || !self.worker.is_alive() {
             self.worker = start(&self.model, &self.projector)?;
@@ -90,14 +103,14 @@ impl Granite {
             model: &self.model,
             projector: &self.projector,
             audio: Some(base64::engine::general_purpose::STANDARD.encode(&bytes)),
-            prompt: instruction,
+            prompt: INSTRUCTION,
             // Speech is rarely more than 4 tokens a second.
             max_tokens: 64 + 10 * seconds as u32,
         };
         let timeout = Duration::from_secs(20 + 2 * seconds);
         self.worker
-            .call(&request, timeout)
-            .map(|text| text.trim().to_string())
+            .call_scored(&request, timeout)
+            .map(|(text, confidence)| (text.trim().to_string(), confidence))
     }
 }
 
@@ -113,47 +126,6 @@ fn start(model: &Path, projector: &Path) -> Result<Worker, String> {
     };
     worker.call(&request, LOAD_TIMEOUT)?;
     Ok(worker)
-}
-
-/// Small words trimmed from the ends of keywords. Granite expects to hear each
-/// keyword, so with "a PR" it wrote "A." at the start of dictations.
-const FILLER_WORDS: &[&str] = &[
-    "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "for", "my", "your",
-];
-
-/// The model's instruction, with the dictionary's words as keywords. Words with
-/// angle brackets are left out: the helper reads the prompt's special tokens
-/// and audio marker, and the dictionary can come from a shared sync folder.
-fn instruction(prompt: &Prompt) -> String {
-    let mut words: Vec<String> = Vec::new();
-    for word in &prompt.words {
-        let word = keyword(word);
-        if !word.is_empty()
-            && !word.contains(['<', '>'])
-            && !words.iter().any(|w| w.eq_ignore_ascii_case(&word))
-        {
-            words.push(word);
-        }
-    }
-    if words.is_empty() {
-        return INSTRUCTION.to_string();
-    }
-    format!("{INSTRUCTION} Keywords: {}", words.join(", "))
-}
-
-/// `word` without small words at either end: "a PR" is "PR".
-fn keyword(word: &str) -> String {
-    let parts: Vec<&str> = word.split_whitespace().collect();
-    let is_filler = |part: &&str| FILLER_WORDS.iter().any(|f| f.eq_ignore_ascii_case(part));
-    let start = parts
-        .iter()
-        .position(|p| !is_filler(p))
-        .unwrap_or(parts.len());
-    let end = parts
-        .iter()
-        .rposition(|p| !is_filler(p))
-        .map_or(start, |i| i + 1);
-    parts[start..end].join(" ")
 }
 
 /// `samples` split into parts of at most `MAX_PART`, each cut at its quietest
@@ -183,38 +155,6 @@ fn energy(frame: &[f32]) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dictionary_words_become_keywords() {
-        assert_eq!(instruction(&Prompt::NONE), INSTRUCTION);
-        let prompt = Prompt {
-            words: vec!["Kubernetes".into(), "Karan".into()],
-            previous: "so we deployed it".into(),
-        };
-        assert_eq!(
-            instruction(&prompt),
-            format!("{INSTRUCTION} Keywords: Kubernetes, Karan")
-        );
-        let tokens = Prompt {
-            words: vec!["<__media__>".into(), "<|end_of_text|>".into(), "C++".into()],
-            previous: String::new(),
-        };
-        assert_eq!(instruction(&tokens), format!("{INSTRUCTION} Keywords: C++"));
-    }
-
-    #[test]
-    fn small_words_are_trimmed_from_keywords() {
-        let prompt = Prompt {
-            words: ["a PR", "Wisper Flow", "the", "Bank of America", "pr"]
-                .map(String::from)
-                .to_vec(),
-            previous: String::new(),
-        };
-        assert_eq!(
-            instruction(&prompt),
-            format!("{INSTRUCTION} Keywords: PR, Wisper Flow, Bank of America")
-        );
-    }
 
     #[test]
     fn long_recordings_are_cut_at_a_pause() {

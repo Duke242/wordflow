@@ -7,7 +7,9 @@
 //! - cleanup: `{"model": "/path/model.gguf", "messages": [{"role": "system", "content": "…"}, …], "maxTokens": 512}`
 //! - speech: `{"model": "/path/model.gguf", "projector": "/path/mmproj.gguf", "audio": "<base64>", "prompt": "…", "maxTokens": 512}`,
 //!   where `audio` is 16 kHz mono samples as little-endian f32
-//! - reply: `{"text": "…"}` or `{"error": "…"}`
+//! - reply: `{"text": "…"}` or `{"error": "…"}`. Speech replies also carry
+//!   `"confidence"`: the average log-probability of the tokens written, low when
+//!   the model is making text up for silence or noise.
 //!
 //! A request without messages or audio only loads the model (and projector), so
 //! the first dictation doesn't wait for it. The model stays loaded until another
@@ -69,6 +71,14 @@ struct Reply {
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confidence: Option<f32>,
+}
+
+/// What the model wrote, with the average log-probability of its tokens.
+struct Generated {
+    text: String,
+    confidence: f32,
 }
 
 struct Loaded {
@@ -105,13 +115,15 @@ fn main() {
             Err(e) => Err(format!("Unreadable request: {e}")),
         };
         let reply = match reply {
-            Ok(text) => Reply {
+            Ok((text, confidence)) => Reply {
                 text: Some(text),
                 error: None,
+                confidence,
             },
             Err(error) => Reply {
                 text: None,
                 error: Some(error),
+                confidence: None,
             },
         };
         let written = serde_json::to_writer(&mut stdout, &reply)
@@ -129,7 +141,7 @@ fn handle(
     backend: &LlamaBackend,
     loaded: &mut Option<Loaded>,
     request: &Request,
-) -> Result<String, String> {
+) -> Result<(String, Option<f32>), String> {
     let loaded = load(
         backend,
         loaded,
@@ -142,24 +154,26 @@ fn handle(
             .audio
             .as_mut()
             .ok_or("Audio needs a projector to go with the model")?;
-        return transcribe(
+        let generated = transcribe(
             backend,
             &loaded.model,
             projector,
             &samples,
             &request.prompt,
             request.max_tokens,
-        );
+        )?;
+        return Ok((generated.text, Some(generated.confidence)));
     }
     if request.messages.is_empty() {
-        return Ok(String::new());
+        return Ok((String::new(), None));
     }
-    generate(
+    let generated = generate(
         backend,
         &loaded.model,
         &request.messages,
         request.max_tokens,
-    )
+    )?;
+    Ok((generated.text, None))
 }
 
 /// The model at `path`, with `projector` for audio, loading them unless
@@ -238,7 +252,7 @@ fn transcribe(
     samples: &[f32],
     instruction: &str,
     max_tokens: u32,
-) -> Result<String, String> {
+) -> Result<Generated, String> {
     let bitmap = MtmdBitmap::from_audio_data(samples)
         .map_err(|e| format!("Couldn't read the audio: {e}"))?;
     let text = MtmdInputText {
@@ -286,17 +300,21 @@ fn sample(
     mut position: i32,
     n_ctx: u32,
     mut last: i32,
-) -> Result<String, String> {
+) -> Result<Generated, String> {
     let vocab = model.vocab();
     // Greedy: cleanup and transcripts should be the same every time, not creative.
     let mut sampler = LlamaSampler::greedy();
     let mut batch = LlamaBatch::new(1, 1);
     let mut output = Vec::new();
+    let mut log_probability = 0.0;
+    let mut tokens = 0;
     while (position as u32) < n_ctx {
         let token = sampler.sample(ctx, last);
         if vocab.is_eog(token) {
             break;
         }
+        log_probability += token_log_probability(ctx.get_logits_ith(last), token.0);
+        tokens += 1;
         vocab.token_to_piece_into(token, &mut output, false, None);
         batch.clear();
         batch
@@ -306,7 +324,24 @@ fn sample(
         last = 0;
         position += 1;
     }
-    Ok(String::from_utf8_lossy(&output).into_owned())
+    Ok(Generated {
+        text: String::from_utf8_lossy(&output).into_owned(),
+        confidence: if tokens == 0 {
+            0.0
+        } else {
+            log_probability / tokens as f32
+        },
+    })
+}
+
+/// The log-probability of `token` under `logits`, by a stable log-softmax.
+fn token_log_probability(logits: &[f32], token: i32) -> f32 {
+    let Some(&logit) = usize::try_from(token).ok().and_then(|i| logits.get(i)) else {
+        return f32::NEG_INFINITY;
+    };
+    let max = logits.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let sum: f32 = logits.iter().map(|l| (l - max).exp()).sum();
+    logit - max - sum.ln()
 }
 
 fn generate(
@@ -314,7 +349,7 @@ fn generate(
     model: &LlamaModel,
     messages: &[Message],
     max_tokens: u32,
-) -> Result<String, String> {
+) -> Result<Generated, String> {
     let chat = messages
         .iter()
         .map(|m| LlamaChatMessage::new(m.role.clone(), m.content.clone()))

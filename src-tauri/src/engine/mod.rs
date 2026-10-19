@@ -14,10 +14,7 @@ use std::path::Path;
 
 pub use whisper::silence_logs;
 
-use crate::{
-    models::{EngineKind, ModelInfo},
-    text::Prompt,
-};
+use crate::models::{EngineKind, ModelInfo};
 
 enum Loaded {
     Whisper(whisper::Whisper),
@@ -64,19 +61,18 @@ impl Engine {
     /// Transcribes 16 kHz mono audio. `language` is a Whisper code or "auto",
     /// which Whisper detects for each part of a longer dictation separated by
     /// pauses. Parakeet takes no language: v3 recognizes its 25 languages
-    /// without being told which, and Granite its 6. Granite takes the prompt's
-    /// words as keywords; Parakeet has no way to take a `prompt`.
+    /// without being told which, and Granite its 6. `prompt` (see `text::prompt`)
+    /// is only used by Whisper: Parakeet has no way to take one, and Granite's
+    /// keywords cost it punctuation and leaked into transcripts.
     pub fn transcribe(
         &mut self,
         samples: &[f32],
         language: &str,
-        prompt: &Prompt,
+        prompt: &str,
     ) -> Result<String, String> {
         match &mut self.loaded {
-            Some((_, Loaded::Whisper(model))) => {
-                model.transcribe(samples, language, &prompt.text())
-            }
-            Some((_, Loaded::Granite(model))) => model.transcribe(samples, prompt),
+            Some((_, Loaded::Whisper(model))) => model.transcribe(samples, language, prompt),
+            Some((_, Loaded::Granite(model))) => model.transcribe(samples),
             #[cfg(parakeet)]
             Some((_, Loaded::Parakeet(model))) => model.transcribe(samples),
             None => Err("No model loaded".into()),

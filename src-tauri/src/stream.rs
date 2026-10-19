@@ -340,9 +340,7 @@ mod tests {
         let seconds = samples.len() as f64 / RATE as f64;
 
         let started = Instant::now();
-        let whole = engine
-            .transcribe(&samples, "en", &text::Prompt::NONE)
-            .expect("whole");
+        let whole = engine.transcribe(&samples, "en", "").expect("whole");
         let without = started.elapsed();
 
         let mut heard = Heard::default();
@@ -353,9 +351,7 @@ mod tests {
             while let Some(end) = live::phrase_end(&PARTS, &pending, false) {
                 let carry = live::overlap_at(&PARTS, &pending, end);
                 let started = Instant::now();
-                let words = engine
-                    .transcribe(&pending[..end], "en", &text::Prompt::NONE)
-                    .expect("part");
+                let words = engine.transcribe(&pending[..end], "en", "").expect("part");
                 busy += started.elapsed();
                 heard.append(if carry > 0 {
                     words.trim_end_matches('.')
@@ -369,7 +365,7 @@ mod tests {
         }
         let started = Instant::now();
         let rest = engine
-            .transcribe(&samples[heard.start..], "en", &text::Prompt::NONE)
+            .transcribe(&samples[heard.start..], "en", "")
             .expect("rest");
         heard.append(&rest);
         let with = started.elapsed();

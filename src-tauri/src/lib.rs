@@ -129,12 +129,12 @@ pub mod devtools {
 
         for file in files {
             let (samples, duration) = crate::media::decode_file(file)?;
-            let text = engine.transcribe(&samples, language, &crate::text::Prompt::NONE)?;
+            let text = engine.transcribe(&samples, language, "")?;
             let mut times: Vec<_> = (0..runs.max(1))
                 .map(|_| {
                     let started = Instant::now();
                     engine
-                        .transcribe(&samples, language, &crate::text::Prompt::NONE)
+                        .transcribe(&samples, language, "")
                         .map(|_| started.elapsed())
                 })
                 .collect::<Result<_, _>>()?;

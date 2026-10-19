@@ -31,7 +31,7 @@ The engineering checklist for WordFlow.
 - [x] Language choice with recent languages
 - [x] Filler-word removal, smart trailing punctuation, dictionary rules
 - [x] Parakeet v2 (English) and v3 (25 languages), on CPU, about 25–30x real time on an M3 Pro
-- [x] Granite Speech 4.1 2B (6 languages), through llama.cpp in the helper program: about half Parakeet's errors on LibriSpeech test-other, with dictionary words as keywords
+- [x] Granite Speech 4.1 2B (6 languages), through llama.cpp in the helper program: about half Parakeet's errors on LibriSpeech test-other, with transcripts it isn't sure of dropped so silence pastes nothing
 - [x] Neural Engine acceleration for Whisper on Apple Silicon (15–30% faster; optional for Turbo)
 - [x] Transcribe while recording, at pauses, so only the last few seconds are left on release
 - [ ] Parakeet on the Neural Engine (CoreML through ONNX Runtime was 3–4x slower than CPU)

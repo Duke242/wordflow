@@ -25,7 +25,10 @@ Granite gets the audio instead of messages, as base64 of 16 kHz mono little-endi
 
 ```
 → {"model": "/path/granite.gguf", "projector": "/path/mmproj.gguf", "audio": "…", "prompt": "transcribe the speech…", "maxTokens": 128}
+← {"text": "…", "confidence": -0.12}
 ```
+
+`confidence` is the average log-probability of the tokens written. It's low when the model makes text up for silence or noise, which the app drops.
 
 A request without `messages` or `audio` only loads the model. Prompts, checks on replies and timeouts are in `src-tauri/src/cleanup.rs` and `src-tauri/src/engine/granite.rs`, and starting and stopping the helper in `src-tauri/src/helper.rs`. This program only runs the model.
 

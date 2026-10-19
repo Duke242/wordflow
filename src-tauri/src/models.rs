@@ -140,7 +140,7 @@ pub const CATALOG: &[ModelInfo] = &[
         repo: "ibm-granite/granite-speech-4.1-2b-GGUF",
         size_mb: 3115,
         languages: Some(GRANITE_LANGUAGES),
-        description: "Most accurate, and spells your dictionary words right. 6 languages.",
+        description: "Most accurate. English and 5 more languages. Slower than Parakeet.",
         speed: 7.8,
         accuracy: 9.8,
         min_ram_gb: 8,
