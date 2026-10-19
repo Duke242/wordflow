@@ -3,6 +3,8 @@
 //! - Whisper: GGML files that whisper.cpp publishes on Hugging Face. On macOS
 //!   each also gets a CoreML encoder so it can run on the Neural Engine.
 //! - Parakeet: int8 ONNX exports of NVIDIA's Parakeet TDT, one folder of files.
+//! - Granite: IBM's Granite Speech as GGUF, a language model and its audio
+//!   projector in one folder, run by the llama.cpp helper (see `helper.rs`).
 //! - Llama: GGUF language models for transcript cleanup, one file each, run
 //!   by the cleanup helper (see `cleanup.rs`). They have their own catalog, so
 //!   they never show up as speech models.
@@ -33,6 +35,12 @@ const PARAKEET_FILES: &[&str] = &[
     "encoder-model.int8.onnx",
 ];
 
+/// Files in a Granite model folder: the language model, then its audio projector.
+pub const GRANITE_FILES: [&str; 2] = ["granite-speech-4.1-2b-Q8_0.gguf", "mmproj-model-f16.gguf"];
+
+/// Languages Granite Speech 4.1 transcribes.
+const GRANITE_LANGUAGES: &[&str] = &["de", "en", "es", "fr", "ja", "pt"];
+
 /// Languages Parakeet TDT v3 transcribes.
 const PARAKEET_V3_LANGUAGES: &[&str] = &[
     "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr", "hr", "hu", "it", "lt", "lv", "mt",
@@ -44,6 +52,8 @@ const PARAKEET_V3_LANGUAGES: &[&str] = &[
 pub enum EngineKind {
     Whisper,
     Parakeet,
+    /// Granite Speech, run through llama.cpp by the helper program.
+    Granite,
     /// A language model for transcript cleanup, run through llama.cpp.
     Llama,
 }
@@ -54,10 +64,10 @@ pub struct ModelInfo {
     pub id: &'static str,
     pub name: &'static str,
     pub engine: EngineKind,
-    /// Whisper and Llama: the file name. Parakeet: the folder name.
+    /// Whisper and Llama: the file name. Parakeet and Granite: the folder name.
     #[serde(skip)]
     pub file: &'static str,
-    /// Hugging Face repo for Parakeet and Llama files.
+    /// Hugging Face repo for Parakeet, Granite and Llama files.
     #[serde(skip)]
     pub repo: &'static str,
     /// CoreML encoder for the Neural Engine, as published next to the GGML file.
@@ -120,6 +130,20 @@ pub const CATALOG: &[ModelInfo] = &[
         speed: 9.7,
         accuracy: 9.2,
         min_ram_gb: 4,
+        ..WHISPER
+    },
+    ModelInfo {
+        id: "granite-speech-4.1-2b",
+        name: "Granite Speech 4.1",
+        engine: EngineKind::Granite,
+        file: "granite-speech-4.1-2b",
+        repo: "ibm-granite/granite-speech-4.1-2b-GGUF",
+        size_mb: 3115,
+        languages: Some(GRANITE_LANGUAGES),
+        description: "Most accurate. English and 5 more languages. Slower than Parakeet.",
+        speed: 7.8,
+        accuracy: 9.8,
+        min_ram_gb: 8,
         ..WHISPER
     },
     ModelInfo {
@@ -252,6 +276,15 @@ pub const CLEANUP_CATALOG: &[ModelInfo] = &[
     },
 ];
 
+/// The files in a Parakeet or Granite model's folder.
+fn folder_files(model: &ModelInfo) -> &'static [&'static str] {
+    match model.engine {
+        EngineKind::Parakeet => PARAKEET_FILES,
+        EngineKind::Granite => &GRANITE_FILES,
+        EngineKind::Whisper | EngineKind::Llama => &[],
+    }
+}
+
 /// A cleanup model by id.
 pub fn find_cleanup(id: &str) -> Option<&'static ModelInfo> {
     CLEANUP_CATALOG.iter().find(|m| m.id == id)
@@ -266,9 +299,14 @@ fn find_any(id: &str) -> Option<&'static ModelInfo> {
 pub const PARAKEET: bool = cfg!(parakeet);
 
 impl ModelInfo {
-    /// Whether this build can run the model.
+    /// Whether this build can run the model. Granite needs the helper program,
+    /// which builds without it leave out.
     pub fn is_available(&self) -> bool {
-        self.engine != EngineKind::Parakeet || PARAKEET
+        match self.engine {
+            EngineKind::Parakeet => PARAKEET,
+            EngineKind::Granite => crate::helper::worker_path().is_some(),
+            EngineKind::Whisper | EngineKind::Llama => true,
+        }
     }
 }
 
@@ -351,7 +389,7 @@ impl ModelStore {
         self.active.lock_unpoisoned()
     }
 
-    /// The Whisper or GGUF file, or Parakeet folder, the engine loads.
+    /// The Whisper or GGUF file, or Parakeet or Granite folder, the engine loads.
     pub fn path(&self, model: &ModelInfo) -> PathBuf {
         self.dir.join(model.file)
     }
@@ -384,7 +422,7 @@ impl ModelStore {
                 }
                 assets
             }
-            EngineKind::Parakeet => PARAKEET_FILES
+            EngineKind::Parakeet | EngineKind::Granite => folder_files(model)
                 .iter()
                 .map(|file| Asset {
                     url: format!("https://huggingface.co/{}/resolve/main/{file}", model.repo),
@@ -412,9 +450,9 @@ impl ModelStore {
     fn is_ready(&self, model: &ModelInfo) -> bool {
         match model.engine {
             EngineKind::Whisper | EngineKind::Llama => self.path(model).is_file(),
-            EngineKind::Parakeet => {
+            EngineKind::Parakeet | EngineKind::Granite => {
                 let dir = self.path(model);
-                PARAKEET_FILES.iter().all(|f| dir.join(f).is_file())
+                folder_files(model).iter().all(|f| dir.join(f).is_file())
             }
         }
     }
@@ -898,10 +936,10 @@ mod tests {
             let path = self.store.path(model);
             match model.engine {
                 EngineKind::Whisper | EngineKind::Llama => std::fs::write(path, b"ggml").unwrap(),
-                EngineKind::Parakeet => {
+                EngineKind::Parakeet | EngineKind::Granite => {
                     std::fs::create_dir_all(&path).unwrap();
-                    for file in PARAKEET_FILES {
-                        std::fs::write(path.join(file), b"onnx").unwrap();
+                    for file in folder_files(model) {
+                        std::fs::write(path.join(file), b"model").unwrap();
                     }
                 }
             }
@@ -961,6 +999,32 @@ mod tests {
         // Turbo's 1.1 GB encoder is an optional extra.
         assert_eq!(size("large-v3-turbo"), 1624);
         assert!(statuses.iter().all(|s| !s.downloaded && !s.downloading));
+    }
+
+    #[test]
+    fn granite_downloads_its_model_and_projector_into_one_folder() {
+        // Not `find`: Granite is only available where the helper is built.
+        let model = CATALOG
+            .iter()
+            .find(|m| m.engine == EngineKind::Granite)
+            .unwrap();
+        let temp = TempStore::new();
+        let assets = temp.store.assets(model, true);
+        assert_eq!(assets.len(), GRANITE_FILES.len());
+        assert!(
+            assets
+                .iter()
+                .all(|a| a.dest.starts_with(temp.store.path(model)))
+        );
+        assert_eq!(
+            assets[1].url,
+            "https://huggingface.co/ibm-granite/granite-speech-4.1-2b-GGUF/resolve/main/mmproj-model-f16.gguf"
+        );
+
+        temp.touch(model);
+        assert!(temp.store.is_ready(model));
+        std::fs::remove_file(temp.store.path(model).join(GRANITE_FILES[1])).unwrap();
+        assert!(!temp.store.is_ready(model));
     }
 
     #[test]

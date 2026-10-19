@@ -156,6 +156,7 @@ export function installBrowserPreview() {
 
   const models = [
     ["parakeet-tdt-v3", "Parakeet v3", "parakeet", 640, 0, false, 25, 9.7, 9.2, false],
+    ["granite-speech-4.1-2b", "Granite Speech 4.1", "granite", 3115, 0, false, 6, 7.8, 9.8, false],
     ["parakeet-tdt-v2", "Parakeet v2 (English)", "parakeet", 631, 0, true, 1, 9.8, 9.1, false],
     ["large-v3-turbo-q5", "Whisper Large v3 Turbo (compressed)", "whisper", 547, 1119, false, null, 7.5, 9.4, true],
     ["large-v3-turbo", "Whisper Large v3 Turbo", "whisper", 1624, 1119, false, null, 7.0, 9.5, false],
@@ -170,7 +171,7 @@ export function installBrowserPreview() {
     sizeMb,
     acceleratorMb,
     downloadMb: (sizeMb as number) + ((acceleratorMb as number) <= 200 ? (acceleratorMb as number) : 0),
-    accelerator: engine === "parakeet" ? "none" : id === "small-en" ? "installed" : "missing",
+    accelerator: engine !== "whisper" ? "none" : id === "small-en" ? "installed" : "missing",
     englishOnly,
     languages: languageCount === null ? null : Array.from({ length: languageCount as number }, (_, i) => `l${i}`),
     description: "A sample description for the browser preview.",

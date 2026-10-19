@@ -4,10 +4,7 @@
 //! and formats spoken lists. It runs in one of three ways:
 //!
 //! - Built in: a GGUF model from `models::CLEANUP_CATALOG`, run by the
-//!   `wordflow-cleanup` helper (cleanup-worker/). It's a separate
-//!   program because whisper.cpp and llama.cpp each bundle a different version
-//!   of ggml, and only one copy survives linking into one binary. It also keeps
-//!   a crash or hang in the model away from dictation.
+//!   `wordflow-cleanup` helper (see `helper`).
 //! - A local server with an OpenAI-compatible API, such as Ollama or LM Studio.
 //! - A hosted model through an OpenAI-compatible API and the user's own key,
 //!   such as OpenAI, Anthropic, Groq or OpenRouter. Transcripts leave the
@@ -18,13 +15,10 @@
 //! transcript is used as it was.
 
 use std::{
-    io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, LazyLock, Mutex, Weak,
         atomic::{AtomicU64, Ordering},
-        mpsc::{self, Receiver, RecvTimeoutError},
     },
     thread,
     time::{Duration, Instant},
@@ -32,8 +26,10 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::helper::worker_path;
 use crate::{
     LockExt,
+    helper::Worker,
     models::{self, ModelStore},
     settings::{CleanupBackend, CleanupSettings},
     text,
@@ -51,8 +47,6 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const IDLE_CHECK: Duration = Duration::from_secs(30);
 
 const SERVER_LIST_TIMEOUT: Duration = Duration::from_secs(5);
-
-const WORKER_NAME: &str = "wordflow-cleanup";
 
 const SYSTEM_PROMPT_START: &str = "\
 You are a transcript editor. You receive text that someone dictated, between <transcript> tags, \
@@ -453,7 +447,7 @@ impl Cleaner {
         }
         if worker.is_none() {
             let id = self.next_worker.fetch_add(1, Ordering::Relaxed);
-            *worker = Some(Worker::spawn(id)?);
+            *worker = Some(Worker::spawn(id, "cleanup")?);
             watch_idle(Arc::downgrade(&self.worker), id);
         }
         let running = worker.as_mut().ok_or("The cleanup helper isn't running")?;
@@ -512,165 +506,12 @@ fn watch_idle(slot: Weak<Mutex<Option<Worker>>>, id: u64) {
     }
 }
 
-/// Where the helper program is: next to the app's own executable once
-/// installed, or in the cleanup-worker build folder while developing.
-/// `WORDFLOW_CLEANUP_WORKER` overrides both.
-pub fn worker_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("WORDFLOW_CLEANUP_WORKER") {
-        return Some(PathBuf::from(path));
-    }
-    let file = format!("{WORKER_NAME}{}", std::env::consts::EXE_SUFFIX);
-    let mut candidates = Vec::new();
-    if let Some(dir) = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-    {
-        candidates.push(dir.join(&file));
-    }
-    if cfg!(debug_assertions) {
-        let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../cleanup-worker/target");
-        candidates.push(target.join("release").join(&file));
-        candidates.push(target.join("debug").join(&file));
-    }
-    candidates.into_iter().find(|path| path.is_file())
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Request<'a> {
     model: &'a Path,
     messages: Vec<Message>,
     max_tokens: u32,
-}
-
-#[derive(Deserialize)]
-struct Reply {
-    text: Option<String>,
-    error: Option<String>,
-}
-
-/// A running `wordflow-cleanup`. Dropping it stops the process.
-struct Worker {
-    id: u64,
-    child: Child,
-    stdin: ChildStdin,
-    /// Lines from the helper's stdout, read on their own thread so waiting for
-    /// one can time out.
-    replies: Receiver<String>,
-    loaded: Option<PathBuf>,
-    last_used: Instant,
-    /// Set when it stopped answering properly. An error reply from a working
-    /// helper doesn't set it, so the model stays loaded.
-    broken: bool,
-}
-
-impl Worker {
-    fn spawn(id: u64) -> Result<Self, String> {
-        let path =
-            worker_path().ok_or("This build of WordFlow doesn't include built-in cleanup")?;
-        let mut command = Command::new(&path);
-        command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-            command.creation_flags(CREATE_NO_WINDOW);
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("Couldn't start the cleanup helper: {e}"))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            let _ = child.kill();
-            return Err("Couldn't talk to the cleanup helper".into());
-        };
-
-        let (sender, replies) = mpsc::channel();
-        let reader = thread::Builder::new()
-            .name("cleanup-reader".into())
-            .spawn(move || {
-                for line in BufReader::new(stdout).lines() {
-                    let Ok(line) = line else { break };
-                    if sender.send(line).is_err() {
-                        break;
-                    }
-                }
-            });
-        if let Err(e) = reader {
-            let _ = child.kill();
-            return Err(format!("Couldn't start the cleanup helper: {e}"));
-        }
-        Ok(Self {
-            id,
-            child,
-            stdin,
-            replies,
-            loaded: None,
-            last_used: Instant::now(),
-            broken: false,
-        })
-    }
-
-    fn is_alive(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(None))
-    }
-
-    fn call(&mut self, request: &Request, timeout: Duration) -> Result<String, String> {
-        let result = self.exchange(request, timeout);
-        if let Err(Failure::Broken(_)) = result {
-            self.broken = true;
-        }
-        result.map_err(|failure| match failure {
-            Failure::Broken(e) | Failure::Refused(e) => e,
-        })
-    }
-
-    fn exchange(&mut self, request: &Request, timeout: Duration) -> Result<String, Failure> {
-        let broken = Failure::Broken;
-        self.last_used = Instant::now();
-        let mut line = serde_json::to_vec(request).map_err(|e| Failure::Refused(e.to_string()))?;
-        line.push(b'\n');
-        self.stdin
-            .write_all(&line)
-            .and_then(|()| self.stdin.flush())
-            .map_err(|e| broken(format!("The cleanup helper stopped: {e}")))?;
-        let reply = match self.replies.recv_timeout(timeout) {
-            Ok(reply) => reply,
-            Err(RecvTimeoutError::Timeout) => {
-                return Err(broken(format!(
-                    "The cleanup model took longer than {timeout:.0?}"
-                )));
-            }
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err(broken("The cleanup helper stopped".into()));
-            }
-        };
-        self.last_used = Instant::now();
-        let reply: Reply = serde_json::from_str(&reply)
-            .map_err(|e| broken(format!("Unreadable reply from the cleanup helper: {e}")))?;
-        match (reply.text, reply.error) {
-            (_, Some(error)) => Err(Failure::Refused(error)),
-            (Some(text), None) => Ok(text),
-            (None, None) => Err(broken("Empty reply from the cleanup helper".into())),
-        }
-    }
-}
-
-enum Failure {
-    /// The helper can't be trusted with another request: it hung, quit, or
-    /// sent something unreadable.
-    Broken(String),
-    /// The helper answered with an error, and is fine for the next request.
-    Refused(String),
-}
-
-impl Drop for Worker {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 // ---- Local server ----

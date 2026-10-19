@@ -1,6 +1,6 @@
 # wordflow-cleanup
 
-The helper program behind AI cleanup's built-in models. WordFlow starts it when cleanup is on, sends it each transcript, and pastes the reply. It runs a GGUF language model with [llama.cpp](https://github.com/ggml-org/llama.cpp).
+The helper program behind AI cleanup's built-in models and the Granite Speech model. WordFlow starts it when cleanup is on, sends it each transcript, and pastes the reply. When Granite is the speech model, a second copy runs it and transcribes each recording. It runs GGUF models with [llama.cpp](https://github.com/ggml-org/llama.cpp).
 
 ## Why it's a separate program
 
@@ -21,7 +21,16 @@ One JSON object per line, on stdin and stdout:
 ← {"error": "…"}
 ```
 
-A request without `messages` only loads the model. The prompt, the checks on the reply, starting and stopping the helper, and timeouts are all in `src-tauri/src/cleanup.rs`. This program only runs the model.
+Granite gets the audio instead of messages, as base64 of 16 kHz mono little-endian f32 samples, with its audio projector and an instruction:
+
+```
+→ {"model": "/path/granite.gguf", "projector": "/path/mmproj.gguf", "audio": "…", "prompt": "transcribe the speech…", "maxTokens": 128}
+← {"text": "…", "confidence": -0.12}
+```
+
+`confidence` is the average log-probability of the tokens written. It's low when the model makes text up for silence or noise, which the app drops.
+
+A request without `messages` or `audio` only loads the model. Prompts, checks on replies and timeouts are in `src-tauri/src/cleanup.rs` and `src-tauri/src/engine/granite.rs`, and starting and stopping the helper in `src-tauri/src/helper.rs`. This program only runs the model.
 
 Set `WORDFLOW_CLEANUP_LOGS=1` to see llama.cpp's own logs on stderr.
 

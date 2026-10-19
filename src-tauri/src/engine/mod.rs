@@ -3,7 +3,9 @@
 //! - Whisper runs through whisper.cpp. On macOS it uses Metal, and the Neural
 //!   Engine for the encoder when the model's CoreML companion is downloaded.
 //! - Parakeet runs through ONNX Runtime.
+//! - Granite runs through llama.cpp, in the helper program.
 
+mod granite;
 #[cfg(parakeet)]
 mod parakeet;
 mod whisper;
@@ -16,6 +18,7 @@ use crate::models::{EngineKind, ModelInfo};
 
 enum Loaded {
     Whisper(whisper::Whisper),
+    Granite(granite::Granite),
     #[cfg(parakeet)]
     Parakeet(parakeet::Parakeet),
 }
@@ -40,6 +43,7 @@ impl Engine {
         self.loaded = None;
         let loaded = match model.engine {
             EngineKind::Whisper => Loaded::Whisper(whisper::Whisper::load(path)?),
+            EngineKind::Granite => Loaded::Granite(granite::Granite::load(path)?),
             #[cfg(parakeet)]
             EngineKind::Parakeet => Loaded::Parakeet(parakeet::Parakeet::load(path)?),
             #[cfg(not(parakeet))]
@@ -57,8 +61,9 @@ impl Engine {
     /// Transcribes 16 kHz mono audio. `language` is a Whisper code or "auto",
     /// which Whisper detects for each part of a longer dictation separated by
     /// pauses. Parakeet takes no language: v3 recognizes its 25 languages
-    /// without being told which. `prompt` (see `text::prompt`) is only used by
-    /// Whisper, as Parakeet has no way to take one.
+    /// without being told which, and Granite its 6. `prompt` (see `text::prompt`)
+    /// is only used by Whisper: Parakeet has no way to take one, and Granite's
+    /// keywords cost it punctuation and leaked into transcripts.
     pub fn transcribe(
         &mut self,
         samples: &[f32],
@@ -67,6 +72,7 @@ impl Engine {
     ) -> Result<String, String> {
         match &mut self.loaded {
             Some((_, Loaded::Whisper(model))) => model.transcribe(samples, language, prompt),
+            Some((_, Loaded::Granite(model))) => model.transcribe(samples),
             #[cfg(parakeet)]
             Some((_, Loaded::Parakeet(model))) => model.transcribe(samples),
             None => Err("No model loaded".into()),

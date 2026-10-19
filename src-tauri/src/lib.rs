@@ -7,6 +7,7 @@ mod device;
 mod dictation;
 mod engine;
 mod gain;
+mod helper;
 mod history;
 mod learn;
 mod live;
