@@ -115,12 +115,20 @@ fn start(model: &Path, projector: &Path) -> Result<Worker, String> {
     Ok(worker)
 }
 
-/// The model's instruction, with the dictionary's words as keywords.
+/// The model's instruction, with the dictionary's words as keywords. Words with
+/// angle brackets are left out: the helper reads the prompt's special tokens
+/// and audio marker, and the dictionary can come from a shared sync folder.
 fn instruction(prompt: &Prompt) -> String {
-    if prompt.words.is_empty() {
+    let words: Vec<&str> = prompt
+        .words
+        .iter()
+        .map(String::as_str)
+        .filter(|word| !word.contains(['<', '>']))
+        .collect();
+    if words.is_empty() {
         return INSTRUCTION.to_string();
     }
-    format!("{INSTRUCTION} Keywords: {}", prompt.words.join(", "))
+    format!("{INSTRUCTION} Keywords: {}", words.join(", "))
 }
 
 /// `samples` split into parts of at most `MAX_PART`, each cut at its quietest
@@ -162,6 +170,11 @@ mod tests {
             instruction(&prompt),
             format!("{INSTRUCTION} Keywords: Kubernetes, Karan")
         );
+        let tokens = Prompt {
+            words: vec!["<__media__>".into(), "<|end_of_text|>".into(), "C++".into()],
+            previous: String::new(),
+        };
+        assert_eq!(instruction(&tokens), format!("{INSTRUCTION} Keywords: C++"));
     }
 
     #[test]
