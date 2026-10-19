@@ -3,7 +3,9 @@
 //! - Whisper runs through whisper.cpp. On macOS it uses Metal, and the Neural
 //!   Engine for the encoder when the model's CoreML companion is downloaded.
 //! - Parakeet runs through ONNX Runtime.
+//! - Granite runs through llama.cpp, in the helper program.
 
+mod granite;
 #[cfg(parakeet)]
 mod parakeet;
 mod whisper;
@@ -12,10 +14,14 @@ use std::path::Path;
 
 pub use whisper::silence_logs;
 
-use crate::models::{EngineKind, ModelInfo};
+use crate::{
+    models::{EngineKind, ModelInfo},
+    text::Prompt,
+};
 
 enum Loaded {
     Whisper(whisper::Whisper),
+    Granite(granite::Granite),
     #[cfg(parakeet)]
     Parakeet(parakeet::Parakeet),
 }
@@ -40,6 +46,7 @@ impl Engine {
         self.loaded = None;
         let loaded = match model.engine {
             EngineKind::Whisper => Loaded::Whisper(whisper::Whisper::load(path)?),
+            EngineKind::Granite => Loaded::Granite(granite::Granite::load(path)?),
             #[cfg(parakeet)]
             EngineKind::Parakeet => Loaded::Parakeet(parakeet::Parakeet::load(path)?),
             #[cfg(not(parakeet))]
@@ -57,16 +64,19 @@ impl Engine {
     /// Transcribes 16 kHz mono audio. `language` is a Whisper code or "auto",
     /// which Whisper detects for each part of a longer dictation separated by
     /// pauses. Parakeet takes no language: v3 recognizes its 25 languages
-    /// without being told which. `prompt` (see `text::prompt`) is only used by
-    /// Whisper, as Parakeet has no way to take one.
+    /// without being told which, and Granite its 6. Granite takes the prompt's
+    /// words as keywords; Parakeet has no way to take a `prompt`.
     pub fn transcribe(
         &mut self,
         samples: &[f32],
         language: &str,
-        prompt: &str,
+        prompt: &Prompt,
     ) -> Result<String, String> {
         match &mut self.loaded {
-            Some((_, Loaded::Whisper(model))) => model.transcribe(samples, language, prompt),
+            Some((_, Loaded::Whisper(model))) => {
+                model.transcribe(samples, language, &prompt.text())
+            }
+            Some((_, Loaded::Granite(model))) => model.transcribe(samples, prompt),
             #[cfg(parakeet)]
             Some((_, Loaded::Parakeet(model))) => model.transcribe(samples),
             None => Err("No model loaded".into()),

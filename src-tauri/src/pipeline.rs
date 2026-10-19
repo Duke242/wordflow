@@ -131,7 +131,7 @@ pub fn run(
     } else if earlier.start == 0 {
         // As before streaming: an empty prompt lets Whisper say there's nothing.
         let words = engine
-            .transcribe(rest, &settings.language, "")
+            .transcribe(rest, &settings.language, &text::Prompt::NONE)
             .map_err(Error::Transcribe)?;
         earlier.append(&words);
     }
@@ -227,7 +227,7 @@ pub fn transcribe_only(
         loaded.map_err(Error::ModelLoad)?;
     }
     let raw = engine
-        .transcribe(samples, &settings.language, "")
+        .transcribe(samples, &settings.language, &text::Prompt::NONE)
         .map_err(Error::Transcribe)?;
     drop(engine);
     // An instruction for the model, not text to paste, so its punctuation stays.

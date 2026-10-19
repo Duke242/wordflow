@@ -158,7 +158,7 @@ export interface InputDevice {
   isDefault: boolean;
 }
 
-export type EngineKind = "whisper" | "parakeet" | "llama";
+export type EngineKind = "whisper" | "parakeet" | "granite" | "llama";
 
 export interface ModelStatus {
   id: string;

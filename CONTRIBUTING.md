@@ -52,8 +52,9 @@ WordFlow is one app for macOS, Windows and Linux. It has two halves:
 │   ├── src/
 │   │   ├── commands.rs          Commands the interface can call
 │   │   ├── dictation.rs         Record → transcribe → paste, as a small state machine
-│   │   ├── audio.rs  engine/    Microphone capture and the Whisper and Parakeet engines
+│   │   ├── audio.rs  engine/    Microphone capture and the Whisper, Parakeet and Granite engines
 │   │   ├── cleanup.rs           Optional transcript cleanup by a local language model
+│   │   ├── helper.rs            Starts and talks to the llama.cpp helper (cleanup-worker/)
 │   │   ├── text.rs  spoken/     Rule-based tidying: dictionary, voice commands, corrections, formatting
 │   │   ├── snippets.rs  sync.rs Snippets, and sharing them and the dictionary through a folder
 │   │   ├── meeting/             Meeting notes: capture, live transcript, storage, summaries
@@ -306,7 +307,7 @@ cargo run --release --example transcribe_wav -- download parakeet-tdt-v3 ./bench
 cargo run --release --example transcribe_wav -- parakeet-tdt-v3 ./bench-models clip.wav 3
 ```
 
-Model ids are in `src/models.rs` (`parakeet-tdt-v3`, `base-en`, `large-v3-turbo`…). Include before and after numbers in any pull request that's meant to make transcription faster.
+Model ids are in `src/models.rs` (`parakeet-tdt-v3`, `base-en`, `large-v3-turbo`…). Granite runs in the helper program, so build it first (`cargo build --release` in `cleanup-worker/`) and point release builds at it with `WORDFLOW_CLEANUP_WORKER=../cleanup-worker/target/release/wordflow-cleanup`. Include before and after numbers in any pull request that's meant to make transcription faster.
 
 ### Try cleanup models and prompts
 

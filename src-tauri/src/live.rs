@@ -612,7 +612,7 @@ mod tests {
                 let carry = overlap_at(&PHRASES, &pending, end);
                 if has_speech(&pending[replayed..end]) {
                     let text = engine
-                        .transcribe(&pending[..end], "en", "")
+                        .transcribe(&pending[..end], "en", &text::Prompt::NONE)
                         .expect("recognize live phrase");
                     let text = if replayed > 0 {
                         without_overlap(&transcript, &text).to_string()
@@ -633,7 +633,7 @@ mod tests {
         }
         if has_speech(&pending[replayed.min(pending.len())..]) {
             let text = engine
-                .transcribe(&pending, "en", "")
+                .transcribe(&pending, "en", &text::Prompt::NONE)
                 .expect("flush final phrase");
             phrases.push(if replayed > 0 {
                 without_overlap(&transcript, &text).to_string()

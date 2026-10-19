@@ -328,37 +328,60 @@ const MAX_HINTS: usize = 40;
 const MAX_HINT_CHARS: usize = 400;
 const MAX_CONTEXT_CHARS: usize = 300;
 
-/// Text for Whisper to read before the audio: the words the dictionary
-/// corrects to, so names and jargon are expected rather than guessed, then the
-/// end of what was already said in this dictation, if anything. Only entries
-/// used in `app` are hinted.
-pub fn prompt(dictionary: &[DictionaryEntry], previous: &str, app: AppCategory) -> String {
-    let mut hints: Vec<&str> = Vec::new();
+/// What a speech model should expect before the audio: the words the
+/// dictionary corrects to, so names and jargon are expected rather than guessed,
+/// and the end of what was already said in this dictation, if anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Prompt {
+    /// Newest dictionary entries first.
+    pub words: Vec<String>,
+    pub previous: String,
+}
+
+impl Prompt {
+    pub const NONE: Self = Self {
+        words: Vec::new(),
+        previous: String::new(),
+    };
+
+    /// The prompt as Whisper reads it, as text just before the audio:
+    /// "Kubernetes, Karan. so we deployed it". Empty for none.
+    pub fn text(&self) -> String {
+        let mut text = self.words.join(", ");
+        if !text.is_empty() {
+            text.push('.');
+        }
+        if !self.previous.is_empty() {
+            if !text.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(&self.previous);
+        }
+        text
+    }
+}
+
+/// The prompt for a dictation into `app`. Only dictionary entries used there
+/// are hinted.
+pub fn prompt(dictionary: &[DictionaryEntry], previous: &str, app: AppCategory) -> Prompt {
+    let mut words: Vec<String> = Vec::new();
     let mut chars = 0;
     // Newest entries first, so recently learned words are kept when there are many.
     for entry in dictionary.iter().rev().filter(|e| e.applies_in(app)) {
         let word = entry.replacement.trim();
-        if !is_vocabulary(word) || hints.iter().any(|h| h.eq_ignore_ascii_case(word)) {
+        if !is_vocabulary(word) || words.iter().any(|h| h.eq_ignore_ascii_case(word)) {
             continue;
         }
-        if hints.len() == MAX_HINTS || chars + word.len() + 2 > MAX_HINT_CHARS {
+        if words.len() == MAX_HINTS || chars + word.len() + 2 > MAX_HINT_CHARS {
             break;
         }
         chars += word.len() + 2;
-        hints.push(word);
+        words.push(word.replace('\0', ""));
     }
-    let mut prompt = hints.join(", ");
-    if !prompt.is_empty() {
-        prompt.push('.');
+    Prompt {
+        words,
+        previous: tail(previous.trim(), MAX_CONTEXT_CHARS).replace('\0', ""),
     }
-    let context = tail(previous.trim(), MAX_CONTEXT_CHARS);
-    if !context.is_empty() {
-        if !prompt.is_empty() {
-            prompt.push(' ');
-        }
-        prompt.push_str(context);
-    }
-    prompt.replace('\0', "")
 }
 
 /// A word or short name worth hinting. Snippets (an address for "my email") and
@@ -441,22 +464,22 @@ mod tests {
             entry("cube our netties", "Kubernetes", true),
         ];
         assert_eq!(
-            prompt(&dictionary, "", AppCategory::Other),
+            prompt(&dictionary, "", AppCategory::Other).text(),
             "Kubernetes, Karan."
         );
         assert_eq!(
-            prompt(&dictionary, "  so we deployed it ", AppCategory::Other),
+            prompt(&dictionary, "  so we deployed it ", AppCategory::Other).text(),
             "Kubernetes, Karan. so we deployed it"
         );
         assert_eq!(
-            prompt(&[], "hello there", AppCategory::Other),
+            prompt(&[], "hello there", AppCategory::Other).text(),
             "hello there"
         );
-        assert_eq!(prompt(&[], "", AppCategory::Other), "");
+        assert_eq!(prompt(&[], "", AppCategory::Other).text(), "");
 
         let mut disabled = entry("teh", "the", true);
         disabled.is_enabled = false;
-        assert_eq!(prompt(&[disabled], "", AppCategory::Other), "");
+        assert_eq!(prompt(&[disabled], "", AppCategory::Other).text(), "");
     }
 
     #[test]
@@ -481,10 +504,13 @@ mod tests {
             "Emerge it into WordFlow"
         );
         assert_eq!(
-            prompt(&dictionary, "", AppCategory::Code),
+            prompt(&dictionary, "", AppCategory::Code).text(),
             "WordFlow, merge."
         );
-        assert_eq!(prompt(&dictionary, "", AppCategory::Email), "WordFlow.");
+        assert_eq!(
+            prompt(&dictionary, "", AppCategory::Email).text(),
+            "WordFlow."
+        );
     }
 
     #[test]
@@ -509,7 +535,7 @@ mod tests {
     #[test]
     fn prompt_keeps_only_the_end_of_long_context_from_a_word_start() {
         let said = "word ".repeat(200);
-        let prompt = prompt(&[], &said, AppCategory::Other);
+        let prompt = prompt(&[], &said, AppCategory::Other).text();
         assert!(prompt.chars().count() <= MAX_CONTEXT_CHARS);
         assert!(prompt.starts_with("word") && prompt.ends_with("word"));
         assert_eq!(tail("héllo wörld", 5), "wörld");
@@ -521,7 +547,7 @@ mod tests {
         let many: Vec<_> = (0..100)
             .map(|i| entry(&format!("t{i}"), &format!("Name{i}"), true))
             .collect();
-        let prompt = prompt(&many, "", AppCategory::Other);
+        let prompt = prompt(&many, "", AppCategory::Other).text();
         assert_eq!(prompt.split(", ").count(), MAX_HINTS);
         assert!(prompt.starts_with("Name99"), "newest first: {prompt}");
     }
