@@ -115,20 +115,45 @@ fn start(model: &Path, projector: &Path) -> Result<Worker, String> {
     Ok(worker)
 }
 
+/// Small words trimmed from the ends of keywords. Granite expects to hear each
+/// keyword, so with "a PR" it wrote "A." at the start of dictations.
+const FILLER_WORDS: &[&str] = &[
+    "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "for", "my", "your",
+];
+
 /// The model's instruction, with the dictionary's words as keywords. Words with
 /// angle brackets are left out: the helper reads the prompt's special tokens
 /// and audio marker, and the dictionary can come from a shared sync folder.
 fn instruction(prompt: &Prompt) -> String {
-    let words: Vec<&str> = prompt
-        .words
-        .iter()
-        .map(String::as_str)
-        .filter(|word| !word.contains(['<', '>']))
-        .collect();
+    let mut words: Vec<String> = Vec::new();
+    for word in &prompt.words {
+        let word = keyword(word);
+        if !word.is_empty()
+            && !word.contains(['<', '>'])
+            && !words.iter().any(|w| w.eq_ignore_ascii_case(&word))
+        {
+            words.push(word);
+        }
+    }
     if words.is_empty() {
         return INSTRUCTION.to_string();
     }
     format!("{INSTRUCTION} Keywords: {}", words.join(", "))
+}
+
+/// `word` without small words at either end: "a PR" is "PR".
+fn keyword(word: &str) -> String {
+    let parts: Vec<&str> = word.split_whitespace().collect();
+    let is_filler = |part: &&str| FILLER_WORDS.iter().any(|f| f.eq_ignore_ascii_case(part));
+    let start = parts
+        .iter()
+        .position(|p| !is_filler(p))
+        .unwrap_or(parts.len());
+    let end = parts
+        .iter()
+        .rposition(|p| !is_filler(p))
+        .map_or(start, |i| i + 1);
+    parts[start..end].join(" ")
 }
 
 /// `samples` split into parts of at most `MAX_PART`, each cut at its quietest
@@ -175,6 +200,20 @@ mod tests {
             previous: String::new(),
         };
         assert_eq!(instruction(&tokens), format!("{INSTRUCTION} Keywords: C++"));
+    }
+
+    #[test]
+    fn small_words_are_trimmed_from_keywords() {
+        let prompt = Prompt {
+            words: ["a PR", "Wisper Flow", "the", "Bank of America", "pr"]
+                .map(String::from)
+                .to_vec(),
+            previous: String::new(),
+        };
+        assert_eq!(
+            instruction(&prompt),
+            format!("{INSTRUCTION} Keywords: PR, Wisper Flow, Bank of America")
+        );
     }
 
     #[test]
