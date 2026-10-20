@@ -322,7 +322,7 @@ cargo run --release --example clean_text -- download qwen2.5-1.5b ./bench-models
 cargo run --release --example clean_text -- qwen2.5-1.5b ./bench-models "um so send it to bob no wait to alice"
 ```
 
-It prints the model's reply and what WordFlow would paste. When a reply doesn't look like an edit of what was said, the transcript is pasted unchanged. Include a few before and after examples in any pull request that changes the prompt.
+It prints the model's reply and what WordFlow would paste. When a reply doesn't look like an edit of what was said, the transcript is pasted unchanged. `@examples/cleanup_cases.txt` in place of the text runs each line of that file: dictations with fillers, self-corrections, lists, names, numbers, and questions and instructions the model must not answer. Include a few before and after examples in any pull request that changes the prompt or the cleanup models.
 
 ---
 

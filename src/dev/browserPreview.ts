@@ -184,8 +184,10 @@ export function installBrowserPreview() {
   }));
 
   const cleanupModels = [
-    ["qwen2.5-1.5b", "Qwen 2.5 1.5B", 1117, "Quick on any computer, and writes 29 languages. The one to start with.", true],
-    ["llama3.2-3b", "Llama 3.2 3B", 2020, "More careful edits, about twice as slow. Best with a GPU or Apple Silicon.", false],
+    ["qwen2.5-1.5b", "Qwen 2.5 1.5B", 1117, "The quickest, and small enough for any computer. Writes 29 languages.", true],
+    ["gemma4-e2b", "Gemma 4 E2B", 3107, "Catches more corrections, names and numbers, nearly as quick. The best balance.", false],
+    ["qwen3.5-4b", "Qwen 3.5 4B", 2741, "The most careful edits, about twice as slow as Gemma. Best with Apple Silicon or a GPU.", false],
+    ["llama3.2-3b", "Llama 3.2 3B", 2020, "Older. Gemma 4 E2B is as quick and misses fewer corrections.", false],
   ].map(([id, name, sizeMb, description, downloaded]) => ({
     id,
     name,

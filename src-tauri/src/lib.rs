@@ -82,26 +82,29 @@ pub mod devtools {
         Ok(())
     }
 
-    /// Cleans up `text` with a built-in model from `models_dir`, or with a
-    /// local server, printing the model's reply, what would be pasted, and how
-    /// long it took. The first run includes loading the model.
+    /// Cleans up each of `texts` with a built-in model from `models_dir`, or
+    /// with a local server, printing the model's reply, what would be pasted,
+    /// and how long it took. The first run includes loading the model.
     pub fn cleanup(
         settings: &CleanupSettings,
         models_dir: &Path,
-        text: &str,
+        texts: &[String],
         runs: usize,
     ) -> Result<(), String> {
         let store = crate::models::ModelStore::new(models_dir.to_path_buf());
         let cleaner = crate::cleanup::Cleaner::default();
-        for run in 1..=runs {
-            let started = Instant::now();
-            let reply = cleaner.reply(settings, &store, text)?;
-            println!("  run {run}: {:.2?}", started.elapsed());
-            if run == runs {
-                println!("  reply: {reply}");
-                match crate::cleanup::accept(text, &reply) {
-                    Some(cleaned) => println!("  pasted: {cleaned}"),
-                    None => println!("  pasted: {text} (the reply was rejected)"),
+        for text in texts {
+            println!("text: {text}");
+            for run in 1..=runs {
+                let started = Instant::now();
+                let reply = cleaner.reply(settings, &store, text)?;
+                println!("  run {run}: {:.2?}", started.elapsed());
+                if run == runs {
+                    println!("  reply: {reply}");
+                    match crate::cleanup::accept(text, &reply) {
+                        Some(cleaned) => println!("  pasted: {cleaned}"),
+                        None => println!("  pasted: {text} (the reply was rejected)"),
+                    }
                 }
             }
         }
