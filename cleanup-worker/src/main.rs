@@ -386,7 +386,8 @@ fn generate(
     };
     // Qwen 3 and 3.5 think before answering unless the reply starts with an
     // empty thought, which their own templates add when thinking is off.
-    if source.contains(r"'<think>\n\n</think>\n\n'") {
+    // Cleanup never wants the thinking: it's slow, and runs out of tokens.
+    if source.contains("enable_thinking") && source.contains("<think>") {
         prompt.push_str("<think>\n\n</think>\n\n");
     }
 

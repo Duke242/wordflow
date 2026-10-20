@@ -84,7 +84,8 @@ pub mod devtools {
 
     /// Cleans up each of `texts` with a built-in model from `models_dir`, or
     /// with a local server, printing the model's reply, what would be pasted,
-    /// and how long it took. The first run includes loading the model.
+    /// and how long it took. The first run includes loading the model. A text
+    /// that fails is reported and skipped.
     pub fn cleanup(
         settings: &CleanupSettings,
         models_dir: &Path,
@@ -97,7 +98,13 @@ pub mod devtools {
             println!("text: {text}");
             for run in 1..=runs {
                 let started = Instant::now();
-                let reply = cleaner.reply(settings, &store, text)?;
+                let reply = match cleaner.reply(settings, &store, text) {
+                    Ok(reply) => reply,
+                    Err(e) => {
+                        println!("  run {run}: failed: {e}");
+                        break;
+                    }
+                };
                 println!("  run {run}: {:.2?}", started.elapsed());
                 if run == runs {
                     println!("  reply: {reply}");
