@@ -329,7 +329,9 @@ fn recognize(
         return Ok(String::new());
     }
     let state = app.state::<AppState>();
-    let model = models::find(&settings.selected_model).ok_or(pipeline::Error::NoModel)?;
+    // The current selection, not the session's: a model picked mid-session
+    // is warmed up, and going back to the old one would load it again.
+    let model = state.selected_model().ok_or(pipeline::Error::NoModel)?;
     let mut engine = state.engine.lock_unpoisoned();
     state
         .load_model(app, &mut engine, model)
