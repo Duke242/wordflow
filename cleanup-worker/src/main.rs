@@ -344,6 +344,24 @@ fn token_log_probability(logits: &[f32], token: i32) -> f32 {
     logit - max - sum.ln()
 }
 
+/// The prompt Gemma 4's template writes for a plain chat with thinking off.
+/// The start token is added when it's tokenized.
+fn gemma4_prompt(messages: &[Message]) -> String {
+    let mut prompt = String::new();
+    for message in messages {
+        let role = match message.role.as_str() {
+            "assistant" => "model",
+            role => role,
+        };
+        prompt.push_str(&format!(
+            "<|turn>{role}\n{}<turn|>\n",
+            message.content.trim()
+        ));
+    }
+    prompt.push_str("<|turn>model\n");
+    prompt
+}
+
 fn generate(
     backend: &LlamaBackend,
     model: &LlamaModel,
@@ -359,9 +377,19 @@ fn generate(
     let template = model.chat_template(None).or_else(|_| {
         LlamaChatTemplate::new("chatml").map_err(|e| format!("Bad chat template: {e}"))
     })?;
-    let prompt = model
-        .apply_chat_template(&template, &chat, true)
-        .map_err(|e| format!("Couldn't build the prompt: {e}"))?;
+    let source = template.to_str().unwrap_or_default();
+    let mut prompt = match model.apply_chat_template(&template, &chat, true) {
+        Ok(prompt) => prompt,
+        // llama.cpp doesn't know Gemma 4's turns yet.
+        Err(_) if source.contains("<|turn>") => gemma4_prompt(messages),
+        Err(e) => return Err(format!("Couldn't build the prompt: {e}")),
+    };
+    // Qwen 3 and 3.5 think before answering unless the reply starts with an
+    // empty thought, which their own templates add when thinking is off.
+    // Cleanup never wants the thinking: it's slow, and runs out of tokens.
+    if source.contains("enable_thinking") && source.contains("<think>") {
+        prompt.push_str("<think>\n\n</think>\n\n");
+    }
 
     let vocab = model.vocab();
     let mut tokens = vocab.tokenize(prompt.as_bytes(), true, true);
