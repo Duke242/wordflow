@@ -206,6 +206,11 @@ fn run(app: &AppHandle, monitor: &Monitor, settings: &Settings, stop: &AtomicBoo
             };
             let carry = live::overlap_at(&PARTS, &audio, end);
             let part = &audio[..end];
+            // A different model was picked: stop rather than swap models
+            // back and forth with its warm-up. Release transcribes the rest.
+            if app.state::<AppState>().settings().selected_model != model.id {
+                return heard;
+            }
             if live::has_speech(&part[heard.replayed.min(part.len())..]) {
                 let words = panic::catch_unwind(AssertUnwindSafe(|| {
                     transcribe(app, settings, model, category, part)

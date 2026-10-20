@@ -470,7 +470,9 @@ fn recognize(
     said: &str,
 ) -> Result<String, String> {
     let state = app.state::<AppState>();
-    let model = models::find(&settings.selected_model).ok_or("No model selected")?;
+    // The current selection, as in live dictation, so switching mid-meeting
+    // doesn't load models back and forth with the warm-up.
+    let model = state.selected_model().ok_or("No model selected")?;
     let mut engine = state.engine.lock_unpoisoned();
     state.load_model(app, &mut engine, model)?;
     let prompt = text::prompt(&settings.dictionary, said, AppCategory::Other);

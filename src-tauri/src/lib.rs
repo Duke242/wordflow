@@ -242,12 +242,14 @@ impl AppState {
         result
     }
 
+    /// The speech model to use now: the selected one, if it's downloaded.
+    pub fn selected_model(&self) -> Option<&'static ModelInfo> {
+        models::find(&self.settings().selected_model).filter(|m| self.models.is_downloaded(m.id))
+    }
+
     /// Loads a downloaded model in the background so the first dictation is fast.
     pub fn warm_up(&self, app: &AppHandle, id: &str) {
-        let Some(model) = models::find(id) else {
-            return;
-        };
-        if !self.models.is_downloaded(id) {
+        if models::find(id).is_none() || !self.models.is_downloaded(id) {
             return;
         }
         let app = app.clone();
@@ -256,6 +258,12 @@ impl AppState {
             .spawn(move || {
                 let state = app.state::<AppState>();
                 let mut engine = state.engine.lock_unpoisoned();
+                // Checked once the engine is ours: when models are switched
+                // quickly, warm-ups queue up, and loading the ones no longer
+                // selected would hold up dictation for nothing.
+                let Some(model) = state.selected_model() else {
+                    return;
+                };
                 if let Err(e) = state.load_model(&app, &mut engine, model) {
                     eprintln!("[models] warm-up failed: {e}");
                 }
