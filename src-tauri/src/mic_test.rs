@@ -77,11 +77,19 @@ pub async fn stop_mic_test(app: AppHandle) -> CommandResult<Response> {
 /// Stops a test without keeping the audio, e.g. when leaving Settings.
 #[tauri::command]
 pub async fn cancel_mic_test(state: State<'_, MicTest>) -> CommandResult<()> {
-    let recording = state.recording.lock_unpoisoned().take();
-    state.clip.lock_unpoisoned().clear();
-    // Closing the microphone can take a moment.
-    tauri::async_runtime::spawn_blocking(move || drop(recording));
+    state.cancel();
     Ok(())
+}
+
+impl MicTest {
+    /// Stops any test and drops its audio, e.g. when the main window closes
+    /// before Settings can do it.
+    pub fn cancel(&self) {
+        let recording = self.recording.lock_unpoisoned().take();
+        self.clip.lock_unpoisoned().clear();
+        // Closing the microphone can take a moment.
+        tauri::async_runtime::spawn_blocking(move || drop(recording));
+    }
 }
 
 /// Transcribes the last clip with the selected model, as dictation would
