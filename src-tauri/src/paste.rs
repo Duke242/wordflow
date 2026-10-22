@@ -13,7 +13,7 @@ use std::{
 };
 
 use arboard::{Clipboard, ImageData};
-use enigo::{Enigo, Keyboard, Settings};
+use enigo::{Enigo, Settings};
 
 use crate::{platform, tone};
 
@@ -68,6 +68,8 @@ impl Paster {
             // first dictates, not at launch.
             let mut clipboard = None;
             let mut enigo = None;
+            // Types into Google Search, tagged so the hotkey tap ignores it.
+            let mut typer = None;
             for job in rx {
                 if clipboard.is_none() {
                     clipboard = Clipboard::new()
@@ -84,7 +86,7 @@ impl Paster {
                 }
                 match job {
                     Job::Paste(job) => {
-                        if let Err(e) = paste(clipboard, enigo.as_mut(), &job) {
+                        if let Err(e) = paste(clipboard, enigo.as_mut(), &mut typer, &job) {
                             eprintln!("[paste] {e}");
                         }
                     }
@@ -185,22 +187,32 @@ fn copy(
 fn paste(
     clipboard: &mut Clipboard,
     mut enigo: Option<&mut Enigo>,
+    typer: &mut Option<Enigo>,
     job: &PasteJob,
 ) -> Result<(), String> {
     // Google Search drops pastes after the clipboard changes, so the text is
     // typed there instead. A search box is one line, so line breaks become spaces.
     if platform::frontmost_app().is_some_and(|app| tone::is_google_search(&app)) {
-        let enigo = enigo.as_deref_mut().ok_or("Keyboard simulation is unavailable")?;
         thread::sleep(BEFORE_PASTE);
-        let text = job.text.split_whitespace().collect::<Vec<_>>().join(" ");
-        enigo
-            .text(&text)
-            .map_err(|e| format!("Couldn't type the text: {e}"))?;
-        if job.send {
-            thread::sleep(BEFORE_SEND);
-            platform::send_return_key(enigo.into())?;
+        let line = job.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        match platform::send_live_text(typer, &line) {
+            Ok(()) => {
+                // Without restoring, the dictation is left on the clipboard, as everywhere else.
+                if !job.restore_clipboard
+                    && let Err(e) = clipboard.set_text(job.text.as_str())
+                {
+                    eprintln!("[paste] couldn't set clipboard: {e}");
+                }
+                if job.send {
+                    thread::sleep(BEFORE_SEND);
+                    if let Err(e) = platform::send_return_key(enigo) {
+                        eprintln!("[paste] {e}");
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => eprintln!("[paste] couldn't type the text, pasting instead: {e}"),
         }
-        return Ok(());
     }
 
     let saved = job.restore_clipboard.then(|| save(clipboard));

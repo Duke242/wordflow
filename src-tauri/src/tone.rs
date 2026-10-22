@@ -256,12 +256,26 @@ pub fn is_google_search(app: &FrontApp) -> bool {
     {
         return false;
     }
-    // "Google - Brave" on the home page, "cats - Google Search - Brave" on results.
-    app.title
-        .to_lowercase()
-        .split(" - ")
-        .any(|part| matches!(part.trim(), "google" | "google search"))
+    // "cats - Google Search - Brave" on results, "Google - Brave" on the home
+    // page. Firefox puts an em dash before its own name.
+    let title = app.title.to_lowercase().replace(" — ", " - ");
+    let parts: Vec<&str> = title.split(" - ").map(str::trim).collect();
+    if parts.contains(&"google search") {
+        return true;
+    }
+    // Only "Google" and the browser's name, so "Google - Wikipedia" doesn't count.
+    parts.first() == Some(&"google")
+        && parts.get(1).is_none_or(|rest| {
+            BROWSER_NAMES
+                .iter()
+                .any(|browser| contains_words(rest, browser))
+        })
 }
+
+/// Words in the name a browser puts at the end of its window titles.
+const BROWSER_NAMES: &[&str] = &[
+    "chrome", "chromium", "safari", "firefox", "edge", "brave", "arc", "vivaldi", "opera", "zen",
+];
 
 /// The built-in apps by category, for Settings.
 pub fn built_in_apps() -> Vec<(&'static str, AppCategory)> {
@@ -623,6 +637,16 @@ mod tests {
         assert!(is_google_search(&results));
         let docs = app("com.google.Chrome", "", "Quarterly plan - Google Docs");
         assert!(!is_google_search(&docs));
+        let firefox = app("org.mozilla.firefox", "Firefox", "Google — Mozilla Firefox");
+        assert!(is_google_search(&firefox));
+        let bare = app("com.apple.Safari", "Safari", "Google");
+        assert!(is_google_search(&bare));
+        let about = app(
+            "com.google.Chrome",
+            "",
+            "Google - Wikipedia - Google Chrome",
+        );
+        assert!(!is_google_search(&about));
         let editor = app("com.apple.TextEdit", "TextEdit", "Google");
         assert!(!is_google_search(&editor));
     }
