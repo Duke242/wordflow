@@ -518,14 +518,18 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building WordFlow");
 
-    app.run(|app, event| match event {
-        // Closing the last window doesn't quit; only Quit does.
-        tauri::RunEvent::ExitRequested {
-            code: None, api, ..
-        } => api.prevent_exit(),
-        // macOS: clicking the Dock icon or opening the app again brings the window back.
-        #[cfg(target_os = "macos")]
-        tauri::RunEvent::Reopen { .. } => tray::open_main_window(app, None),
-        _ => {}
+    app.run(|app, event| {
+        #[cfg(not(target_os = "macos"))]
+        let _ = app;
+        match event {
+            // Closing the last window doesn't quit; only Quit does.
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => api.prevent_exit(),
+            // macOS: clicking the Dock icon or opening the app again brings the window back.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => tray::open_main_window(app, None),
+            _ => {}
+        }
     });
 }
