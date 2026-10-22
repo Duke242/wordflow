@@ -13,9 +13,9 @@ use std::{
 };
 
 use arboard::{Clipboard, ImageData};
-use enigo::{Enigo, Settings};
+use enigo::{Enigo, Keyboard, Settings};
 
-use crate::platform;
+use crate::{platform, tone};
 
 /// Gives the user time to let go of the hotkey's modifier keys, which would
 /// otherwise combine with the simulated paste shortcut.
@@ -187,6 +187,22 @@ fn paste(
     mut enigo: Option<&mut Enigo>,
     job: &PasteJob,
 ) -> Result<(), String> {
+    // Google Search drops pastes after the clipboard changes, so the text is
+    // typed there instead. A search box is one line, so line breaks become spaces.
+    if platform::frontmost_app().is_some_and(|app| tone::is_google_search(&app)) {
+        let enigo = enigo.as_deref_mut().ok_or("Keyboard simulation is unavailable")?;
+        thread::sleep(BEFORE_PASTE);
+        let text = job.text.split_whitespace().collect::<Vec<_>>().join(" ");
+        enigo
+            .text(&text)
+            .map_err(|e| format!("Couldn't type the text: {e}"))?;
+        if job.send {
+            thread::sleep(BEFORE_SEND);
+            platform::send_return_key(enigo.into())?;
+        }
+        return Ok(());
+    }
+
     let saved = job.restore_clipboard.then(|| save(clipboard));
     clipboard
         .set_text(job.text.as_str())

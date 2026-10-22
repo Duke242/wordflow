@@ -245,6 +245,24 @@ pub fn classify(app: &FrontApp, rules: &[AppRule]) -> AppCategory {
     AppCategory::Other
 }
 
+/// Whether `app` is a browser showing Google Search. Its search box drops
+/// pasted text once the clipboard has changed since the last paste into it,
+/// as it does whenever the clipboard is restored after a dictation.
+pub fn is_google_search(app: &FrontApp) -> bool {
+    let names = [&app.id, &app.name].map(|name| normalize(name));
+    if !BROWSERS
+        .iter()
+        .any(|browser| names.iter().any(|name| matches(browser, name)))
+    {
+        return false;
+    }
+    // "Google - Brave" on the home page, "cats - Google Search - Brave" on results.
+    app.title
+        .to_lowercase()
+        .split(" - ")
+        .any(|part| matches!(part.trim(), "google" | "google search"))
+}
+
 /// The built-in apps by category, for Settings.
 pub fn built_in_apps() -> Vec<(&'static str, AppCategory)> {
     BUILT_IN
@@ -591,6 +609,22 @@ mod tests {
         assert_eq!(classify(&other, &[]), AppCategory::Other);
         let editor = app("com.apple.TextEdit", "TextEdit", "Gmail notes");
         assert_eq!(classify(&editor, &[]), AppCategory::Other);
+    }
+
+    #[test]
+    fn google_search_is_found_by_the_window_title() {
+        let home = app("com.brave.Browser", "Brave Browser", "Google - Brave");
+        assert!(is_google_search(&home));
+        let results = app(
+            "com.google.Chrome",
+            "Google Chrome",
+            "cats - Google Search - Google Chrome",
+        );
+        assert!(is_google_search(&results));
+        let docs = app("com.google.Chrome", "", "Quarterly plan - Google Docs");
+        assert!(!is_google_search(&docs));
+        let editor = app("com.apple.TextEdit", "TextEdit", "Google");
+        assert!(!is_google_search(&editor));
     }
 
     #[test]
