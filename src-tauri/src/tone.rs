@@ -245,6 +245,38 @@ pub fn classify(app: &FrontApp, rules: &[AppRule]) -> AppCategory {
     AppCategory::Other
 }
 
+/// Whether `app` is a browser showing Google Search. Its search box drops
+/// pasted text once the clipboard has changed since the last paste into it,
+/// as it does whenever the clipboard is restored after a dictation.
+pub fn is_google_search(app: &FrontApp) -> bool {
+    let names = [&app.id, &app.name].map(|name| normalize(name));
+    if !BROWSERS
+        .iter()
+        .any(|browser| names.iter().any(|name| matches(browser, name)))
+    {
+        return false;
+    }
+    // "cats - Google Search - Brave" on results, "Google - Brave" on the home
+    // page. Firefox puts an em dash before its own name.
+    let title = app.title.to_lowercase().replace(" — ", " - ");
+    let parts: Vec<&str> = title.split(" - ").map(str::trim).collect();
+    if parts.contains(&"google search") {
+        return true;
+    }
+    // Only "Google" and the browser's name, so "Google - Wikipedia" doesn't count.
+    parts.first() == Some(&"google")
+        && parts.get(1).is_none_or(|rest| {
+            BROWSER_NAMES
+                .iter()
+                .any(|browser| contains_words(rest, browser))
+        })
+}
+
+/// Words in the name a browser puts at the end of its window titles.
+const BROWSER_NAMES: &[&str] = &[
+    "chrome", "chromium", "safari", "firefox", "edge", "brave", "arc", "vivaldi", "opera", "zen",
+];
+
 /// The built-in apps by category, for Settings.
 pub fn built_in_apps() -> Vec<(&'static str, AppCategory)> {
     BUILT_IN
@@ -591,6 +623,32 @@ mod tests {
         assert_eq!(classify(&other, &[]), AppCategory::Other);
         let editor = app("com.apple.TextEdit", "TextEdit", "Gmail notes");
         assert_eq!(classify(&editor, &[]), AppCategory::Other);
+    }
+
+    #[test]
+    fn google_search_is_found_by_the_window_title() {
+        let home = app("com.brave.Browser", "Brave Browser", "Google - Brave");
+        assert!(is_google_search(&home));
+        let results = app(
+            "com.google.Chrome",
+            "Google Chrome",
+            "cats - Google Search - Google Chrome",
+        );
+        assert!(is_google_search(&results));
+        let docs = app("com.google.Chrome", "", "Quarterly plan - Google Docs");
+        assert!(!is_google_search(&docs));
+        let firefox = app("org.mozilla.firefox", "Firefox", "Google — Mozilla Firefox");
+        assert!(is_google_search(&firefox));
+        let bare = app("com.apple.Safari", "Safari", "Google");
+        assert!(is_google_search(&bare));
+        let about = app(
+            "com.google.Chrome",
+            "",
+            "Google - Wikipedia - Google Chrome",
+        );
+        assert!(!is_google_search(&about));
+        let editor = app("com.apple.TextEdit", "TextEdit", "Google");
+        assert!(!is_google_search(&editor));
     }
 
     #[test]
