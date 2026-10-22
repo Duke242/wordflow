@@ -321,6 +321,29 @@ fn fit_to_screen(window: &tauri::WebviewWindow) {
     }
 }
 
+/// Builds the main window again after it was closed, from its entry in
+/// tauri.conf.json. `route` picks the screen it opens on.
+pub(crate) fn create_main_window(
+    app: &AppHandle,
+    route: Option<&str>,
+) -> tauri::Result<tauri::WebviewWindow> {
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .cloned()
+        .ok_or(tauri::Error::WindowNotFound)?;
+    if let Some(route) = route {
+        config.url = tauri::WebviewUrl::App(format!("index.html#{route}").into());
+    }
+    let window = tauri::WebviewWindowBuilder::from_config(app, &config)?.build()?;
+    platform::style_main_window(&window);
+    fit_to_screen(&window);
+    Ok(window)
+}
+
 pub fn run() {
     let app = tauri::Builder::default()
         // Launching WordFlow again brings the running app forward instead of
@@ -380,7 +403,7 @@ pub fn run() {
                 platform::style_main_window(&main);
                 fit_to_screen(&main);
                 if in_background {
-                    let _ = main.hide();
+                    tray::close_main_window(app.handle(), &main);
                 }
             }
 
@@ -425,10 +448,12 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| match (window.label(), event) {
-            // Closing the main window keeps WordFlow running in the tray.
+            // Closing the main window keeps WordFlow running in the menu bar or tray.
             ("main", WindowEvent::CloseRequested { api, .. }) => {
                 api.prevent_close();
-                let _ = window.hide();
+                if let Some(main) = window.app_handle().get_webview_window("main") {
+                    tray::close_main_window(window.app_handle(), &main);
+                }
             }
             // The menu bar panel behaves like a popover: it closes when you click elsewhere.
             (tray::PANEL_LABEL, WindowEvent::Focused(false)) => {
@@ -493,13 +518,14 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building WordFlow");
 
-    app.run(|app, event| {
-        // macOS: clicking the Dock icon brings the hidden window back.
+    app.run(|app, event| match event {
+        // Closing the last window doesn't quit; only Quit does.
+        tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } => api.prevent_exit(),
+        // macOS: clicking the Dock icon or opening the app again brings the window back.
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = event {
-            tray::open_main_window(app, None);
-        }
-        #[cfg(not(target_os = "macos"))]
-        let _ = (app, event);
+        tauri::RunEvent::Reopen { .. } => tray::open_main_window(app, None),
+        _ => {}
     });
 }

@@ -45,7 +45,11 @@ function useDailyUpdateCheck(enabled: boolean) {
 
 export function App() {
   const { settings, models, updateSettings } = useStore();
-  const [route, setRoute] = useState<Route>("dashboard");
+  // A window reopened from the menu bar may start on a screen given in its URL.
+  const [route, setRoute] = useState<Route>(() => {
+    const hash = window.location.hash.slice(1);
+    return NAV.some((item) => item.route === hash) ? (hash as Route) : "dashboard";
+  });
   // The menu bar panel can open a specific screen.
   useTauriEvent<string>("navigate", ({ payload }) => {
     if (NAV.some((item) => item.route === payload)) setRoute(payload as Route);

@@ -94,10 +94,24 @@ pub fn show_state(app: &AppHandle, state: &DictationState) {
     }
 }
 
-/// Shows the main window, optionally on a specific screen ("settings", "history"…).
+/// Shows the main window, optionally on a specific screen ("settings", "history"…),
+/// building it again if it was closed.
 pub fn open_main_window(app: &AppHandle, route: Option<&str>) {
     hide_panel(app);
-    if let Some(window) = app.get_webview_window("main") {
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    let window = match app.get_webview_window("main") {
+        Some(window) => {
+            if let Some(route) = route {
+                let _ = app.emit_to("main", "navigate", route);
+            }
+            Some(window)
+        }
+        None => crate::create_main_window(app, route)
+            .inspect_err(|e| eprintln!("[window] {e}"))
+            .ok(),
+    };
+    if let Some(window) = window {
         let _ = window.show();
         let _ = window.unminimize();
         // Windows ignores focus requests from a background process unless the
@@ -107,10 +121,21 @@ pub fn open_main_window(app: &AppHandle, route: Option<&str>) {
         let _ = window.set_focus();
         #[cfg(windows)]
         let _ = window.set_always_on_top(false);
-        if let Some(route) = route {
-            let _ = app.emit_to("main", "navigate", route);
-        }
     }
+}
+
+/// Closes the main window the way Proton apps do: with the tray icon showing,
+/// the window is destroyed to free its memory and, on macOS, WordFlow leaves
+/// the Dock and the app switcher. Dictation keeps running in the background.
+/// Without the tray icon it is only hidden, so the Dock icon can bring it back.
+pub fn close_main_window(app: &AppHandle, window: &WebviewWindow) {
+    if !app.state::<AppState>().settings().show_tray_icon {
+        let _ = window.hide();
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    let _ = window.destroy();
 }
 
 pub fn hide_panel(app: &AppHandle) {
