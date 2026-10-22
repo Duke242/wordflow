@@ -133,6 +133,8 @@ pub fn close_main_window(app: &AppHandle, window: &WebviewWindow) {
         let _ = window.hide();
         return;
     }
+    // The page can't stop its microphone test once it's gone.
+    app.state::<crate::mic_test::MicTest>().cancel();
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
     let _ = window.destroy();
