@@ -84,7 +84,7 @@ impl Paster {
                         .map_err(|e| eprintln!("[paste] keyboard simulation unavailable: {e}"))
                         .ok();
                 }
-                match job {
+                with_pool(|| match job {
                     Job::Paste(job) => {
                         if let Err(e) = paste(clipboard, enigo.as_mut(), &mut typer, &job) {
                             eprintln!("[paste] {e}");
@@ -99,7 +99,7 @@ impl Paster {
                     Job::Copy { terminal, reply } => {
                         let _ = reply.send(copy(clipboard, enigo.as_mut(), terminal));
                     }
-                }
+                });
             }
         });
         // Without the thread, jobs are dropped but transcripts still reach
@@ -245,6 +245,19 @@ fn paste(
         Saved::Empty => clipboard.clear(),
     }
     .map_err(|e| format!("Couldn't restore clipboard: {e}"))
+}
+
+/// Frees what macOS hands back for later release, like the clipboard data
+/// read and written, once each job is done. This thread lives as long as the
+/// app, so without a pool of its own a copied image leaked on every paste.
+#[cfg(target_os = "macos")]
+fn with_pool<R>(f: impl FnOnce() -> R) -> R {
+    objc2::rc::autoreleasepool(|_| f())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn with_pool<R>(f: impl FnOnce() -> R) -> R {
+    f()
 }
 
 fn save(clipboard: &mut Clipboard) -> Saved {

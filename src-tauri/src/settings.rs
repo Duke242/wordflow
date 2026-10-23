@@ -163,6 +163,8 @@ pub struct Settings {
     pub tone: ToneSettings,
     /// Shortcut for command mode, which edits selected text by voice. Empty when off.
     pub command_hotkey: String,
+    /// Shortcut that pastes the latest transcript again. Empty when off.
+    pub paste_last_hotkey: String,
     pub restore_clipboard: bool,
     /// Keep each dictation's audio next to its transcript, so it can be replayed.
     pub save_recordings: bool,
@@ -215,6 +217,7 @@ impl Default for Settings {
             cleanup: CleanupSettings::default(),
             tone: ToneSettings::default(),
             command_hotkey: String::new(),
+            paste_last_hotkey: String::new(),
             restore_clipboard: true,
             save_recordings: true,
             learn_corrections: true,
@@ -397,6 +400,7 @@ mod tests {
             "cleanup",
             "tone",
             "commandHotkey",
+            "pasteLastHotkey",
             "restoreClipboard",
             "saveRecordings",
             "learnCorrections",

@@ -108,6 +108,8 @@ pub enum Event {
     Escape,
     /// Return while recording, with Finish and send on.
     Send,
+    /// Paste the latest transcript again, for when the first paste missed.
+    PasteLast,
     /// A transcription worker moved on to another stage.
     Stage {
         session: u64,
@@ -492,6 +494,7 @@ impl Controller {
                         HotkeyEvent::Down => Event::HotkeyDown,
                         HotkeyEvent::Up => Event::HotkeyUp,
                         HotkeyEvent::Interrupted => Event::HotkeyInterrupted,
+                        HotkeyEvent::Send => Event::Send,
                     })
                 }),
             );
@@ -544,6 +547,7 @@ impl Session {
             Event::Toggle => self.input(Input::Toggle),
             Event::Escape => self.input(Input::Escape),
             Event::Send => self.input(Input::Send),
+            Event::PasteLast => self.paste_last(),
             Event::Stage { session, stage } => self.stage(session, stage),
             Event::Transcribed { session, outcome } => self.transcribed(session, outcome),
             Event::LiveTypingPaused { session } => {
@@ -605,6 +609,28 @@ impl Session {
                 }
                 self.stop(false);
             }
+        }
+    }
+
+    /// Pastes the latest transcript into the focused app. Not while a
+    /// dictation is under way, which pastes its own.
+    fn paste_last(&mut self) {
+        if !matches!(self.phase, Phase::Idle | Phase::Message { .. }) {
+            return;
+        }
+        let (last, restore) = {
+            let state = self.state();
+            let last = state
+                .history
+                .lock_unpoisoned()
+                .items()
+                .first()
+                .map(|item| item.transcript.clone());
+            (last, state.settings().restore_clipboard)
+        };
+        match last {
+            Some(text) => self.paster.paste(text, restore, false),
+            None => self.flash("Nothing to paste yet", ERROR_MESSAGE),
         }
     }
 
@@ -1018,6 +1044,35 @@ impl Session {
             }
         }
     }
+}
+
+/// Registers the shortcut that pastes the latest transcript, replacing
+/// `previous`. An empty shortcut turns it off.
+pub fn register_paste_last_hotkey(
+    app: &AppHandle,
+    controller: &Controller,
+    hotkey: &str,
+    previous: Option<&str>,
+) -> Result<(), String> {
+    let shortcuts = app.global_shortcut();
+    if let Some(previous) = previous.map(str::trim).filter(|p| !p.is_empty()) {
+        let _ = shortcuts.unregister(previous);
+    }
+    let hotkey = hotkey.trim();
+    if hotkey.is_empty() {
+        return Ok(());
+    }
+    if platform::MODIFIER_HOTKEYS.contains(&hotkey) {
+        return Err("The paste shortcut needs a regular key, like Ctrl+Shift+V".into());
+    }
+    let controller = controller.clone();
+    shortcuts
+        .on_shortcut(hotkey, move |_, _, event| {
+            if event.state == ShortcutState::Pressed {
+                controller.send(Event::PasteLast);
+            }
+        })
+        .map_err(|e| format!("Couldn't register {hotkey}: {e}"))
 }
 
 /// One at a time, so a key that isn't registered doesn't keep the others.

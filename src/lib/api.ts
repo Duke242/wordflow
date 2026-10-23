@@ -111,6 +111,8 @@ export interface Settings {
   tone: ToneSettings;
   /** Shortcut that edits selected text by voice, or "" when off. */
   commandHotkey: string;
+  /** Shortcut that pastes the latest transcript again, or "" when off. */
+  pasteLastHotkey: string;
   restoreClipboard: boolean;
   /** Keep each dictation's audio so it can be replayed from History. */
   saveRecordings: boolean;

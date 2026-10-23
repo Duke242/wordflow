@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { UpdateDialog } from "@/components/UpdateDialog";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import { api, type DictionaryEntry, type UpdateInfo } from "@/lib/api";
 import { useStore } from "@/lib/store";
 import { useLearnedToast } from "@/lib/useLearnedToast";
 import { useTauriEvent } from "@/lib/useTauriEvent";
+import { markAllSeen, readSeen, unseenEntries } from "@/lib/whatsNew";
 import { NAV } from "./routes";
 import { useApplyTheme } from "@/lib/theme";
 import { DashboardScreen } from "@/screens/dashboard/DashboardScreen";
@@ -69,6 +71,19 @@ export function App() {
 
   const update = useDailyUpdateCheck(settings.autoUpdate && settings.hasCompletedOnboarding);
 
+  // Shown once after an update. New users start with everything seen.
+  const [whatsNew, setWhatsNew] = useState(() => unseenEntries(readSeen()));
+  useEffect(() => {
+    if (!settings.hasCompletedOnboarding) {
+      markAllSeen();
+      setWhatsNew([]);
+    }
+  }, [settings.hasCompletedOnboarding]);
+  const closeWhatsNew = () => {
+    markAllSeen();
+    setWhatsNew([]);
+  };
+
   if (!settings.hasCompletedOnboarding) {
     return <OnboardingScreen />;
   }
@@ -76,6 +91,8 @@ export function App() {
   return (
     <div className="flex h-full bg-shell">
       <UpdateDialog update={update.info} onClose={update.dismiss} />
+      {/* After the update prompt, so the two don't stack. */}
+      <WhatsNewDialog entries={update.info ? null : whatsNew} onClose={closeWhatsNew} onNavigate={setRoute} />
       <Rail route={route} onNavigate={setRoute} />
       {/* The screens sit on a panel that floats on the window's shell, beside the rail. */}
       <div className="relative my-2 mr-2 min-w-0 flex-1 overflow-hidden rounded-panel border border-line bg-flow shadow-panel">

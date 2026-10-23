@@ -312,13 +312,14 @@ unsafe fn handle_event(event_type: u32, event: CGEventRef) -> CGEventRef {
 
     // SAFETY: flags-changed and key-down events both carry a keycode.
     let keycode = unsafe { CGEventGetIntegerValueField(event, KEYCODE_FIELD) };
-    let (reported, is_fn) = {
+    let (reported, is_fn, swallow) = {
         let mut guard = ACTIVE.lock_unpoisoned();
         let Some(active) = guard.as_mut() else {
             return event;
         };
         let mut reported = None;
         let mut is_fn = false;
+        let mut swallow = false;
         match event_type {
             FLAGS_CHANGED if keycode == active.key.keycode() => {
                 // SAFETY: `event` is a valid event.
@@ -334,23 +335,26 @@ unsafe fn handle_event(event_type: u32, event: CGEventRef) -> CGEventRef {
                 }
                 is_fn = active.key == ModifierKey::Fn;
             }
-            // Another key while the hotkey is held means it's part of a normal
-            // shortcut (⌘C with ⌘ as the hotkey), not a dictation. Except
-            // Return with Fn, which the send key catches: Fn isn't a modifier
-            // to global shortcuts, so Fn+Return still reaches them.
+            // Return with Fn held is caught here and swallowed: the global
+            // shortcut for Return doesn't fire while Fn is down.
             KEY_DOWN
                 if active.pressed
-                    && keycode != i64::from(KEYCODE_F19)
-                    && !(active.key == ModifierKey::Fn
-                        && SENDS.load(Ordering::Relaxed)
-                        && is_return(keycode)) =>
+                    && active.key == ModifierKey::Fn
+                    && SENDS.load(Ordering::Relaxed)
+                    && is_return(keycode) =>
             {
+                reported = Some((Arc::clone(&active.handler), HotkeyEvent::Send));
+                swallow = true;
+            }
+            // Another key while the hotkey is held means it's part of a normal
+            // shortcut (⌘C with ⌘ as the hotkey), not a dictation.
+            KEY_DOWN if active.pressed && keycode != i64::from(KEYCODE_F19) => {
                 active.pressed = false;
                 reported = Some((Arc::clone(&active.handler), HotkeyEvent::Interrupted));
             }
             _ => {}
         }
-        (reported, is_fn)
+        (reported, is_fn, swallow)
     };
 
     if let Some((handler, hotkey_event)) = reported {
@@ -365,7 +369,11 @@ unsafe fn handle_event(event_type: u32, event: CGEventRef) -> CGEventRef {
         }
     }
     // Swallow Fn so terminals don't receive stray escape sequences.
-    if is_fn { ptr::null_mut() } else { event }
+    if is_fn || swallow {
+        ptr::null_mut()
+    } else {
+        event
+    }
 }
 
 const TERMINALS: &[&str] = &[

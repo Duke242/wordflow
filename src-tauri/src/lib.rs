@@ -432,6 +432,14 @@ pub fn run() {
                     ) {
                         eprintln!("[hotkey] command shortcut: {e}");
                     }
+                    if let Err(e) = dictation::register_paste_last_hotkey(
+                        &handle,
+                        &state.controller,
+                        &settings.paste_last_hotkey,
+                        None,
+                    ) {
+                        eprintln!("[hotkey] paste last shortcut: {e}");
+                    }
                     state.controller.send(Event::RefreshPill);
                     state.warm_up(&handle, &settings.selected_model);
                     state.cleaner.warm_up(&settings.cleanup, &state.models);

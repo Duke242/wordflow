@@ -12,7 +12,11 @@ Live typing is enabled in Settings → Behavior. It inserts short phrases during
 
 ## Finish and send
 
-Finish and send (Settings → Behavior) sends a message in one go: press Return while recording, hands-free or with the hotkey held, and WordFlow stops, inserts the transcript and presses Return about 150 ms later. Return (and on a Mac keypad Enter, which Fn+Return gives) is only claimed while recording. With a modifier hotkey like ⌘ held, Return is part of a shortcut and cancels as any other key does; Fn isn't such a modifier, so Fn+Return sends. A sent dictation isn't watched for corrections, as the field is cleared.
+Finish and send (Settings → Behavior) sends a message in one go: press Return while recording, hands-free or with the hotkey held, and WordFlow stops, inserts the transcript and presses Return about 150 ms later. Return (and on a Mac keypad Enter, which Fn+Return gives) is only claimed while recording. With a modifier hotkey like ⌘ held, Return is part of a shortcut and cancels as any other key does; Fn isn't such a modifier, so Fn+Return sends; the Fn listener catches that Return itself, as the global shortcut doesn't fire while Fn is held. A sent dictation isn't watched for corrections, as the field is cleared.
+
+## Paste last transcript
+
+When a dictation lands in the wrong place, or nowhere because no field had focus, the menu bar icon's menu has Paste Last Transcript, and Settings can give it a shortcut (Ctrl+Shift+V suggested on a Mac, Ctrl+Alt+V elsewhere). It pastes the newest History item into the focused app. It does nothing while a dictation is recording or transcribing.
 
 ## Tone that fits the app
 
