@@ -2,6 +2,7 @@ import {
   AudioLines,
   BookA,
   ClipboardCheck,
+  ClipboardPaste,
   Command,
   CornerDownLeft,
   Ear,
@@ -33,11 +34,13 @@ import { CleanupSection } from "@/components/settings/CleanupSection";
 import { CommandHotkeyPicker } from "@/components/settings/CommandHotkeyPicker";
 import { HotkeyPicker } from "@/components/settings/HotkeyPicker";
 import { MicTestSection } from "@/components/settings/MicTestSection";
+import { PasteLastHotkeyPicker } from "@/components/settings/PasteLastHotkeyPicker";
 import { PillPositionPicker } from "@/components/settings/PillPositionPicker";
 import { SharingSection } from "@/components/settings/SharingSection";
 import { SpokenSection } from "@/components/settings/SpokenSection";
 import { PermissionList } from "@/components/PermissionList";
 import { UpdateDialog } from "@/components/UpdateDialog";
+import { WhatsNewDialog } from "@/components/WhatsNewDialog";
 import {
   Badge,
   Button,
@@ -59,6 +62,7 @@ import { hotkeyBlockedMessage, useWhileHotkeyBlocked } from "@/lib/hotkeyBlocked
 
 import { LANGUAGES, languageName } from "@/lib/languages";
 import { useStore } from "@/lib/store";
+import { WHATS_NEW } from "@/lib/whatsNew";
 
 type Tab = "general" | "dictation" | "ai" | "audio" | "permissions";
 
@@ -185,6 +189,13 @@ function GeneralTab() {
           description="Select text in any app, hold this shortcut and say what to change, like “make this friendlier”. The result replaces your selection. Uses the model set up under AI cleanup."
         >
           <CommandHotkeyPicker />
+        </SettingRow>
+        <SettingRow
+          icon={ClipboardPaste}
+          label="Paste last transcript"
+          description="Pastes your latest dictation again, for when it landed in the wrong place or nowhere. Also in the menu of the menu bar icon."
+        >
+          <PasteLastHotkeyPicker />
         </SettingRow>
       </Section>
 
@@ -415,6 +426,7 @@ function UpdatesSection() {
   const toast = useToast();
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
 
   const check = async () => {
     setChecking(true);
@@ -445,7 +457,13 @@ function UpdatesSection() {
       >
         <Switch checked={settings.autoUpdate} onChange={(autoUpdate) => save({ autoUpdate })} />
       </SettingRow>
+      <SettingRow icon={Sparkles} label="What's new" description="The latest changes to WordFlow.">
+        <Button size="sm" onClick={() => setShowWhatsNew(true)}>
+          Show
+        </Button>
+      </SettingRow>
       <UpdateDialog update={update} onClose={() => setUpdate(null)} />
+      <WhatsNewDialog entries={showWhatsNew ? WHATS_NEW : null} onClose={() => setShowWhatsNew(false)} />
     </Section>
   );
 }

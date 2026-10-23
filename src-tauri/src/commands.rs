@@ -88,6 +88,13 @@ pub async fn save_settings(
     if !settings.command_hotkey.is_empty() && settings.command_hotkey == settings.hotkey {
         return Err("The command shortcut can't be the dictation hotkey".into());
     }
+    let paste_last_changed = settings.paste_last_hotkey != previous.paste_last_hotkey;
+    if !settings.paste_last_hotkey.is_empty()
+        && (settings.paste_last_hotkey == settings.hotkey
+            || settings.paste_last_hotkey == settings.command_hotkey)
+    {
+        return Err("The paste shortcut is already used by another shortcut".into());
+    }
 
     // Changed first, so a failure shows before anything is saved, and put
     // back if saving fails later on.
@@ -131,6 +138,31 @@ pub async fn save_settings(
         undo_login();
         return Err(e);
     }
+    let register_paste_last = |hotkey: &str, previous: &str| {
+        crate::dictation::register_paste_last_hotkey(
+            &app,
+            &state.controller,
+            hotkey,
+            Some(previous),
+        )
+    };
+    if paste_last_changed
+        && let Err(e) =
+            register_paste_last(&settings.paste_last_hotkey, &previous.paste_last_hotkey)
+    {
+        let _ = register_paste_last(&previous.paste_last_hotkey, &settings.paste_last_hotkey);
+        if command_changed {
+            let _ = register_command(&previous.command_hotkey, &settings.command_hotkey);
+        }
+        if hotkey_changed {
+            let _ =
+                state
+                    .controller
+                    .register_hotkey(&app, &previous.hotkey, Some(&settings.hotkey));
+        }
+        undo_login();
+        return Err(e);
+    }
     if let Err(e) = state.replace_settings(settings.clone()) {
         // Keep the registered hotkeys in step with the saved settings.
         if hotkey_changed {
@@ -141,6 +173,9 @@ pub async fn save_settings(
         }
         if command_changed {
             let _ = register_command(&previous.command_hotkey, &settings.command_hotkey);
+        }
+        if paste_last_changed {
+            let _ = register_paste_last(&previous.paste_last_hotkey, &settings.paste_last_hotkey);
         }
         return Err(e);
     }

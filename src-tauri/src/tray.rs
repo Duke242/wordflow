@@ -42,12 +42,27 @@ const ICON_BUSY: &[u8] = include_bytes!("../icons/tray/busy.png");
 pub fn build(app: &AppHandle, visible: bool) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open WordFlow", true, None::<&str>)?;
     let dictate = MenuItem::with_id(app, "dictate", "Start Dictation", true, None::<&str>)?;
+    let paste_last = MenuItem::with_id(
+        app,
+        "paste-last",
+        "Paste Last Transcript",
+        true,
+        None::<&str>,
+    )?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit WordFlow", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
-        &[&dictate, &separator, &open, &settings, &separator, &quit],
+        &[
+            &dictate,
+            &paste_last,
+            &separator,
+            &open,
+            &settings,
+            &separator,
+            &quit,
+        ],
     )?;
 
     TrayIconBuilder::with_id(TRAY_ID)
@@ -60,6 +75,7 @@ pub fn build(app: &AppHandle, visible: bool) -> tauri::Result<()> {
             "open" => open_main_window(app, None),
             "settings" => open_main_window(app, Some("settings")),
             "dictate" => app.state::<AppState>().controller.send(Event::Toggle),
+            "paste-last" => app.state::<AppState>().controller.send(Event::PasteLast),
             "quit" => app.exit(0),
             _ => {}
         })

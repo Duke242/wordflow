@@ -75,6 +75,8 @@ pub enum HotkeyEvent {
     Up,
     /// Another key was pressed while the hotkey was held.
     Interrupted,
+    /// Return or keypad Enter, while Finish and send claims them.
+    Send,
 }
 
 /// Receives single-modifier hotkey changes. Called on the listener's own
