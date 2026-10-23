@@ -4,6 +4,7 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "app": "tauri dev",
     "app:build": "node scripts/build-cleanup-worker.mjs && tauri build --config src-tauri/tauri.cleanup.conf.json",
     "worker:build": "node scripts/build-cleanup-worker.mjs",

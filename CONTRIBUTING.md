@@ -185,7 +185,13 @@ Check which session you're on with `echo $XDG_SESSION_TYPE`. If you can, test ch
 
 ## Run the app
 
-All commands run from the repo root.
+All commands run from the repo root. The first time, run:
+
+```bash
+npm run setup
+```
+
+It checks your tools, installs dependencies, builds the cleanup helper and starts the app. After that, start the app with:
 
 ```bash
 npm run app
