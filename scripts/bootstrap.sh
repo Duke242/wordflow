@@ -52,7 +52,7 @@ main() {
 
   step "Rust"
   if ! has cargo && [ ! -x "$HOME/.cargo/bin/cargo" ]; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y </dev/null
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
   fi
   export PATH="$HOME/.cargo/bin:$PATH"
   cargo --version
