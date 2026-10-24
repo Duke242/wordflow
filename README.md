@@ -16,7 +16,13 @@ Details for each are in [docs/features.md](docs/features.md). To contribute, see
 
 ## Develop
 
-Requires Node 22+, a current stable Rust toolchain and CMake. On Linux, also install the system libraries listed in `.github/actions/setup-desktop-build/action.yml`.
+On a new Mac, this one command installs everything, clones the repo to `~/wordflow` and starts the app:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Duke242/wordflow/main/scripts/bootstrap.sh | bash
+```
+
+Otherwise, WordFlow requires Node 22+, a current stable Rust toolchain and CMake. On Linux, also install the system libraries listed in `.github/actions/setup-desktop-build/action.yml`.
 
 ```sh
 npm run setup      # first time: install, build the cleanup helper and start the app
