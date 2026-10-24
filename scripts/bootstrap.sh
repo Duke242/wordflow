@@ -41,7 +41,7 @@ main() {
     if [ -x "$brew_bin" ]; then eval "$("$brew_bin" shellenv)"; break; fi
   done
   has brew || fail "Homebrew didn't install. See https://brew.sh"
-  brew --version | head -1
+  echo "$(brew --version | head -1)"
 
   step "Node and CMake"
   if ! has node || [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
