@@ -124,9 +124,9 @@ jobs:
     permissions:
       contents: write
     env:
-      # Forks don't have the Apple signing secrets. Their macOS builds are left
-      # unsigned rather than failing; a release tag still needs the secrets.
-      UNSIGNED_MACOS: ${{ matrix.name == 'macOS' && secrets.DEVELOPER_ID_APPLICATION_CERT == '' && !startsWith(github.ref, 'refs/tags/') }}
+      # Without the Apple signing secrets the macOS app is built unsigned rather
+      # than failing. A release labels it as unsigned.
+      UNSIGNED_MACOS: ${{ matrix.name == 'macOS' && secrets.DEVELOPER_ID_APPLICATION_CERT == '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-desktop-build
@@ -192,10 +192,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUSTFLAGS: ""
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: .
           tauriScript: npx tauri
           args: ${{ matrix.args }} --config src-tauri/tauri.cleanup.conf.json
+      # Attached by hand rather than by tauri-action, so the installer's name says it's unsigned.
+      - name: Attach the unsigned macOS app to the release
+        if: env.UNSIGNED_MACOS == 'true' && startsWith(github.ref, 'refs/tags/v2.')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bundle=src-tauri/target/universal-apple-darwin/release/bundle
+          version="${GITHUB_REF_NAME#v}"
+          dmg="WordFlow_${version}_universal_unsigned.dmg"
+          update="WordFlow_${version}_universal.app.tar.gz"
+          mv "$bundle"/dmg/*.dmg "$bundle/dmg/$dmg"
+          cp "$bundle/macos/WordFlow.app.tar.gz" "$update"
+          cp "$bundle/macos/WordFlow.app.tar.gz.sig" "$update.sig"
+          gh release upload "$GITHUB_REF_NAME" "$bundle/dmg/$dmg" "$update" "$update.sig" --clobber
+          notes="$(gh release view "$GITHUB_REF_NAME" --json body -q .body)"
+          gh release edit "$GITHUB_REF_NAME" --notes "$notes
+
+          **macOS:** \`$dmg\` isn't signed by Apple. If macOS blocks it the first time, open System Settings → Privacy & Security and click Open Anyway."
       - name: Note the unsigned build
         if: env.UNSIGNED_MACOS == 'true'
         run: echo "::warning title=Unsigned macOS build::The Apple signing secrets aren't set, so this macOS app isn't signed or notarized. Gatekeeper will warn when it's opened."
