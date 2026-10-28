@@ -3,7 +3,7 @@
 use serde::Serialize;
 use sysinfo::{CpuRefreshKind, MemoryRefreshKind, RefreshKind, System};
 
-use crate::models::{CATALOG, ModelInfo};
+use crate::models::{CATALOG, EngineKind, ModelInfo};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -128,8 +128,8 @@ fn score(model: &ModelInfo, device: &DeviceInfo) -> f64 {
     let mut score = SPEED_WEIGHT * (model.speed / 10.0) * (0.5 + 0.5 * device.performance_tier)
         + ACCURACY_WEIGHT * (model.accuracy / 10.0)
         + ((device.ram_gb.saturating_sub(model.min_ram_gb)) as f64 * 0.01).min(0.1);
-    // Large models are slow without a GPU.
-    if !device.gpu && model.size_mb > 1000 {
+    // Large models are slow without a GPU. Parakeet runs on the CPU anyway.
+    if !device.gpu && model.size_mb > 1000 && model.engine != EngineKind::Parakeet {
         score -= 0.15;
     }
     score

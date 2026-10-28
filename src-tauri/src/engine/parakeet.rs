@@ -1,4 +1,5 @@
-//! NVIDIA Parakeet (TDT, 0.6B) through ONNX Runtime, using the int8 export.
+//! NVIDIA Parakeet (TDT, 0.6B) through ONNX Runtime: the int8 export, or the
+//! full-precision one when a folder has no int8 files (v3, see `models`).
 
 use std::{path::Path, sync::Once};
 
