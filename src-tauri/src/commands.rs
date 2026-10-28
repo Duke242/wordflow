@@ -345,6 +345,50 @@ pub async fn download_model(
     Ok(())
 }
 
+/// Replaces models still running from an older download, in the background:
+/// Parakeet v3's int8 export with the full-precision one. The old files keep
+/// working until the new ones are in place.
+pub fn upgrade_models(app: &AppHandle) {
+    for model in app.state::<AppState>().models.outdated() {
+        let app = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = upgrade_model(&app, model.id).await {
+                eprintln!("[models] couldn't upgrade {}: {e}", model.name);
+            }
+        });
+    }
+}
+
+async fn upgrade_model(app: &AppHandle, id: &'static str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _ = app.emit("models-changed", ());
+    let result = state
+        .models
+        .download(id, None, |progress| {
+            let _ = app.emit("model-progress", progress);
+        })
+        .await;
+    let _ = app.emit("models-changed", ());
+    result?;
+    // Waits for any transcription using the old files to finish.
+    let unload_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = unload_app.state::<AppState>();
+        let mut engine = state.engine.lock_unpoisoned();
+        if engine.loaded_model() == Some(id) {
+            engine.unload();
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let _ = app.emit("engine-changed", ());
+    if state.settings().selected_model == id {
+        state.warm_up(app, id);
+    }
+    let model = models::find(id).ok_or("Unknown model")?;
+    state.models.remove_outdated(model)
+}
+
 #[tauri::command]
 pub async fn cancel_download(state: State<'_, AppState>, id: String) -> CommandResult<()> {
     state.models.cancel(&id);

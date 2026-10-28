@@ -2,7 +2,7 @@
 //!
 //! - Whisper: GGML files that whisper.cpp publishes on Hugging Face. On macOS
 //!   each also gets a CoreML encoder so it can run on the Neural Engine.
-//! - Parakeet: int8 ONNX exports of NVIDIA's Parakeet TDT, one folder of files.
+//! - Parakeet: ONNX exports of NVIDIA's Parakeet TDT, one folder of files.
 //! - Granite: IBM's Granite Speech as GGUF, a language model and its audio
 //!   projector in one folder, run by the llama.cpp helper (see `helper.rs`).
 //! - Llama: GGUF language models for transcript cleanup, one file each, run
@@ -27,13 +27,29 @@ use crate::{LockExt, platform};
 
 const WHISPER_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
-/// Files in a Parakeet model folder, as `ParakeetModel::load` expects them.
-const PARAKEET_FILES: &[&str] = &[
+/// Files in a folder of Parakeet's int8 export, as `ParakeetModel::load` expects them.
+const PARAKEET_INT8_FILES: &[&str] = &[
     "nemo128.onnx",
     "vocab.txt",
     "decoder_joint-model.int8.onnx",
     "encoder-model.int8.onnx",
 ];
+
+/// Parakeet v3 in full precision. Its int8 encoder drops whole sentences,
+/// most often of quieter speech: on 60 dictations it got 19% of words wrong
+/// and cut 5 short, against 10% and none for this export. `ParakeetModel::load`
+/// falls back to these files when there's no int8 one.
+const PARAKEET_FP32_FILES: &[&str] = &[
+    "nemo128.onnx",
+    "vocab.txt",
+    "decoder_joint-model.onnx",
+    "encoder-model.onnx",
+    "encoder-model.onnx.data",
+];
+
+/// Where Parakeet v3's int8 export was installed. It's still used until the
+/// full-precision one has downloaded (see `ModelStore::outdated`).
+const PARAKEET_V3_INT8: &str = "parakeet-tdt-0.6b-v3-int8";
 
 /// Files in a Granite model folder: the language model, then its audio projector.
 pub const GRANITE_FILES: [&str; 2] = ["granite-speech-4.1-2b-Q8_0.gguf", "mmproj-model-f16.gguf"];
@@ -70,6 +86,9 @@ pub struct ModelInfo {
     /// Hugging Face repo for Parakeet, Granite and Llama files.
     #[serde(skip)]
     pub repo: &'static str,
+    /// Parakeet and Granite: the files in the folder.
+    #[serde(skip)]
+    pub files: &'static [&'static str],
     /// CoreML encoder for the Neural Engine, as published next to the GGML file.
     #[serde(skip)]
     pub coreml_encoder: Option<&'static str>,
@@ -106,6 +125,7 @@ const WHISPER: ModelInfo = ModelInfo {
     engine: EngineKind::Whisper,
     file: "",
     repo: "",
+    files: &[],
     coreml_encoder: None,
     size_mb: 0,
     accelerator_mb: 0,
@@ -122,14 +142,15 @@ pub const CATALOG: &[ModelInfo] = &[
         id: "parakeet-tdt-v3",
         name: "Parakeet v3",
         engine: EngineKind::Parakeet,
-        file: "parakeet-tdt-0.6b-v3-int8",
+        file: "parakeet-tdt-0.6b-v3",
         repo: "istupakov/parakeet-tdt-0.6b-v3-onnx",
-        size_mb: 640,
+        files: PARAKEET_FP32_FILES,
+        size_mb: 2550,
         languages: Some(PARAKEET_V3_LANGUAGES),
-        description: "Fastest model, with punctuation. English and 24 European languages.",
-        speed: 9.7,
-        accuracy: 9.2,
-        min_ram_gb: 4,
+        description: "Fast and accurate, with punctuation. English and 24 European languages.",
+        speed: 9.5,
+        accuracy: 9.4,
+        min_ram_gb: 6,
         ..WHISPER
     },
     ModelInfo {
@@ -138,6 +159,7 @@ pub const CATALOG: &[ModelInfo] = &[
         engine: EngineKind::Granite,
         file: "granite-speech-4.1-2b",
         repo: "ibm-granite/granite-speech-4.1-2b-GGUF",
+        files: &GRANITE_FILES,
         size_mb: 3115,
         languages: Some(GRANITE_LANGUAGES),
         description: "Most accurate. English and 5 more languages. Slower than Parakeet.",
@@ -152,6 +174,7 @@ pub const CATALOG: &[ModelInfo] = &[
         engine: EngineKind::Parakeet,
         file: "parakeet-tdt-0.6b-v2-int8",
         repo: "istupakov/parakeet-tdt-0.6b-v2-onnx",
+        files: PARAKEET_INT8_FILES,
         size_mb: 631,
         english_only: true,
         languages: Some(&["en"]),
@@ -304,11 +327,7 @@ pub const CLEANUP_CATALOG: &[ModelInfo] = &[
 
 /// The files in a Parakeet or Granite model's folder.
 fn folder_files(model: &ModelInfo) -> &'static [&'static str] {
-    match model.engine {
-        EngineKind::Parakeet => PARAKEET_FILES,
-        EngineKind::Granite => &GRANITE_FILES,
-        EngineKind::Whisper | EngineKind::Llama => &[],
-    }
+    model.files
 }
 
 /// A cleanup model by id.
@@ -417,7 +436,39 @@ impl ModelStore {
 
     /// The Whisper or GGUF file, or Parakeet or Granite folder, the engine loads.
     pub fn path(&self, model: &ModelInfo) -> PathBuf {
+        match self.int8_fallback(model) {
+            Some(dir) if !self.is_installed(model) => dir,
+            _ => self.dest(model),
+        }
+    }
+
+    /// Where the model downloads to.
+    fn dest(&self, model: &ModelInfo) -> PathBuf {
         self.dir.join(model.file)
+    }
+
+    /// Parakeet v3's int8 export, if it's installed.
+    fn int8_fallback(&self, model: &ModelInfo) -> Option<PathBuf> {
+        let dir = self.dir.join(PARAKEET_V3_INT8);
+        (model.id == "parakeet-tdt-v3" && PARAKEET_INT8_FILES.iter().all(|f| dir.join(f).is_file()))
+            .then_some(dir)
+    }
+
+    /// Models still running from an older download that should be replaced.
+    pub fn outdated(&self) -> Vec<&'static ModelInfo> {
+        available()
+            .filter(|m| !self.is_installed(m) && self.int8_fallback(m).is_some())
+            .collect()
+    }
+
+    /// Removes what an outdated model ran from, once its replacement is installed.
+    pub fn remove_outdated(&self, model: &ModelInfo) -> Result<(), String> {
+        match self.int8_fallback(model) {
+            Some(dir) if self.is_installed(model) => {
+                std::fs::remove_dir_all(dir).map_err(|e| e.to_string())
+            }
+            _ => Ok(()),
+        }
     }
 
     fn coreml_path(&self, model: &ModelInfo) -> Option<PathBuf> {
@@ -432,7 +483,7 @@ impl ModelStore {
             EngineKind::Whisper => {
                 let mut assets = vec![Asset {
                     url: format!("{WHISPER_BASE_URL}/{}", model.file),
-                    dest: self.path(model),
+                    dest: self.dest(model),
                     zipped: false,
                 }];
                 if let (true, Some(zip), Some(dest)) = (
@@ -452,7 +503,7 @@ impl ModelStore {
                 .iter()
                 .map(|file| Asset {
                     url: format!("https://huggingface.co/{}/resolve/main/{file}", model.repo),
-                    dest: self.path(model).join(file),
+                    dest: self.dest(model).join(file),
                     zipped: false,
                 })
                 .collect(),
@@ -461,7 +512,7 @@ impl ModelStore {
                     "https://huggingface.co/{}/resolve/main/{}",
                     model.repo, model.file
                 ),
-                dest: self.path(model),
+                dest: self.dest(model),
                 zipped: false,
             }],
         }
@@ -474,10 +525,15 @@ impl ModelStore {
     }
 
     fn is_ready(&self, model: &ModelInfo) -> bool {
+        self.is_installed(model) || self.int8_fallback(model).is_some()
+    }
+
+    /// Every file of the current download is in place.
+    fn is_installed(&self, model: &ModelInfo) -> bool {
         match model.engine {
-            EngineKind::Whisper | EngineKind::Llama => self.path(model).is_file(),
+            EngineKind::Whisper | EngineKind::Llama => self.dest(model).is_file(),
             EngineKind::Parakeet | EngineKind::Granite => {
-                let dir = self.path(model);
+                let dir = self.dest(model);
                 folder_files(model).iter().all(|f| dir.join(f).is_file())
             }
         }
@@ -528,7 +584,8 @@ impl ModelStore {
 
     pub fn delete(&self, id: &str) -> Result<(), String> {
         let model = find_any(id).ok_or("Unknown model")?;
-        let mut paths = vec![self.path(model)];
+        let mut paths = vec![self.dest(model)];
+        paths.extend(self.int8_fallback(model));
         // Large Turbo and its compressed build share one encoder; keep it while either is installed.
         if let Some(coreml) = self.coreml_path(model) {
             let shared = CATALOG.iter().any(|other| {
@@ -929,7 +986,7 @@ mod tests {
     fn parakeet_assets_live_in_one_folder() {
         let store = ModelStore::new(PathBuf::from("/models"));
         let assets = store.assets(find("parakeet-tdt-v2").unwrap(), true);
-        assert_eq!(assets.len(), PARAKEET_FILES.len());
+        assert_eq!(assets.len(), PARAKEET_INT8_FILES.len());
         assert!(
             assets
                 .iter()
@@ -959,7 +1016,7 @@ mod tests {
         }
 
         fn touch(&self, model: &ModelInfo) {
-            let path = self.store.path(model);
+            let path = self.store.dest(model);
             match model.engine {
                 EngineKind::Whisper | EngineKind::Llama => std::fs::write(path, b"ggml").unwrap(),
                 EngineKind::Parakeet | EngineKind::Granite => {
@@ -1060,9 +1117,63 @@ mod tests {
         assert!(!temp.store.is_downloaded(model.id));
         temp.touch(model);
         assert!(temp.store.is_downloaded(model.id));
-        std::fs::remove_file(temp.store.path(model).join(PARAKEET_FILES[1])).unwrap();
+        std::fs::remove_file(temp.store.path(model).join(folder_files(model)[1])).unwrap();
         assert!(!temp.store.is_downloaded(model.id));
         assert!(!temp.store.is_downloaded("no-such-model"));
+    }
+
+    #[test]
+    fn parakeet_v3_downloads_the_full_precision_export() {
+        let store = ModelStore::new(PathBuf::from("/models"));
+        let assets = store.assets(find("parakeet-tdt-v3").unwrap(), true);
+        let urls: Vec<&str> = assets.iter().map(|a| a.url.as_str()).collect();
+        assert!(urls.contains(
+            &"https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data"
+        ));
+        assert!(!urls.iter().any(|url| url.contains("int8")));
+        assert!(
+            assets
+                .iter()
+                .all(|a| a.dest.starts_with("/models/parakeet-tdt-0.6b-v3/"))
+        );
+    }
+
+    #[test]
+    fn parakeet_v3_runs_from_its_int8_export_until_replaced() {
+        let temp = TempStore::new();
+        let model = find("parakeet-tdt-v3").unwrap();
+        let int8 = temp.root.join(PARAKEET_V3_INT8);
+        std::fs::create_dir_all(&int8).unwrap();
+        for file in PARAKEET_INT8_FILES {
+            std::fs::write(int8.join(file), b"model").unwrap();
+        }
+        assert!(temp.store.is_downloaded(model.id));
+        assert_eq!(temp.store.path(model), int8);
+        assert_eq!(temp.store.outdated()[0].id, model.id);
+        // Not removed while it's all there is.
+        temp.store.remove_outdated(model).unwrap();
+        assert!(int8.is_dir());
+
+        temp.touch(model);
+        assert_eq!(temp.store.path(model), temp.root.join(model.file));
+        assert!(temp.store.outdated().is_empty());
+        temp.store.remove_outdated(model).unwrap();
+        assert!(!int8.exists());
+        assert!(temp.store.is_downloaded(model.id));
+    }
+
+    #[test]
+    fn deleting_parakeet_v3_removes_its_int8_export_too() {
+        let temp = TempStore::new();
+        let model = find("parakeet-tdt-v3").unwrap();
+        let int8 = temp.root.join(PARAKEET_V3_INT8);
+        std::fs::create_dir_all(&int8).unwrap();
+        for file in PARAKEET_INT8_FILES {
+            std::fs::write(int8.join(file), b"model").unwrap();
+        }
+        temp.store.delete(model.id).unwrap();
+        assert!(!int8.exists());
+        assert!(!temp.store.is_downloaded(model.id));
     }
 
     #[test]

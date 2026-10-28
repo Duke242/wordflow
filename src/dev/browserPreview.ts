@@ -156,7 +156,7 @@ export function installBrowserPreview() {
   }));
 
   const models = [
-    ["parakeet-tdt-v3", "Parakeet v3", "parakeet", 640, 0, false, 25, 9.7, 9.2, false],
+    ["parakeet-tdt-v3", "Parakeet v3", "parakeet", 2550, 0, false, 25, 9.5, 9.4, false],
     ["granite-speech-4.1-2b", "Granite Speech 4.1", "granite", 3115, 0, false, 6, 7.8, 9.8, false],
     ["parakeet-tdt-v2", "Parakeet v2 (English)", "parakeet", 631, 0, true, 1, 9.8, 9.1, false],
     ["large-v3-turbo-q5", "Whisper Large v3 Turbo (compressed)", "whisper", 547, 1119, false, null, 7.5, 9.4, true],
