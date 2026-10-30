@@ -112,7 +112,12 @@ impl Paster {
 
     /// Queues `text` to be pasted into the focused app, then Return pressed
     /// if `send`. Returns immediately.
-    pub fn paste(&self, text: String, restore_clipboard: bool, send: bool) {
+    pub fn paste(&self, mut text: String, restore_clipboard: bool, send: bool) {
+        // A trailing space lets the user dictate again without typing one. Not
+        // when sending, as the message leaves the field.
+        if !send && !text.is_empty() && !text.ends_with(char::is_whitespace) {
+            text.push(' ');
+        }
         let _ = self.tx.send(Job::Paste(PasteJob {
             text,
             restore_clipboard,

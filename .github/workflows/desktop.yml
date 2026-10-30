@@ -154,6 +154,10 @@ jobs:
       - name: Build the cleanup helper
         env:
           RUSTFLAGS: ""
+          # The helper only loads local models, so llama.cpp needs no HTTPS.
+          # The macOS runner's Homebrew OpenSSL is found without libssl, which
+          # breaks the build.
+          CMAKE_DISABLE_FIND_PACKAGE_OpenSSL: "TRUE"
         run: node scripts/build-cleanup-worker.mjs ${{ matrix.args }}
       - name: Build installers
         if: env.UNSIGNED_MACOS != 'true'
