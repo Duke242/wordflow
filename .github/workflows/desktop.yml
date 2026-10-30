@@ -224,7 +224,7 @@ jobs:
         if: env.UNSIGNED_MACOS == 'true'
         run: echo "::warning title=Unsigned macOS build::The Apple signing secrets aren't set, so this macOS app isn't signed or notarized. Gatekeeper will warn when it's opened."
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           if-no-files-found: error
